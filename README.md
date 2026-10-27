@@ -25,9 +25,9 @@ It's plain HTML, CSS, and JavaScript with no build step. Data and photos are sto
 
 1. Create a free project at supabase.com.
 2. Open **SQL Editor → New query**, paste all of `supabase/schema.sql`, and press **Run**.
-3. Open **Authentication → Users → Add user → Create new user**. Enter the barber's email and a password, and check **Auto Confirm User**.
+3. Open **Authentication → Users → Add user → Create new user**. Enter any email you control and the app password, and check **Auto Confirm User**. The barber never types the email; he only enters the password.
 4. Open **Authentication → Sign In / Providers** and turn off **Allow new users to sign up**, so nobody else can make an account.
-5. Open **Project Settings → API** and copy the **Project URL** and the **anon public** key into `config.js`. Never use the `service_role` key in the app.
+5. Open **Project Settings → API** and copy the **Project URL** and the **anon public** key into `config.js`, along with the email from step 3 as `loginEmail`. Never use the `service_role` key in the app.
 
 ### 2. GitHub Pages
 
@@ -37,8 +37,10 @@ It's plain HTML, CSS, and JavaScript with no build step. Data and photos are sto
 
 ### 3. On the barber's iPhone
 
-1. Open the site in Safari and sign in.
-2. Tap **Share → Add to Home Screen**. CutFolio then opens full-screen like an app, and he stays signed in.
+1. Open the site in Safari.
+2. Tap **Share → Add to Home Screen**, then open CutFolio from the Home Screen and enter the password once. It stays unlocked on that phone until someone taps **Sign out** at the bottom of the home screen.
+
+Opening it from the Home Screen icon matters: Safari can clear a website's saved login after about a week without visits, but it doesn't do that for Home Screen apps.
 
 ## Running locally
 

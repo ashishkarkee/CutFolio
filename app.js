@@ -3,7 +3,7 @@
 
 // ---------- Supabase ----------
 const CONFIG = window.CUTFOLIO_CONFIG || {};
-const sb = CONFIG.supabaseUrl && CONFIG.supabaseAnonKey
+const sb = CONFIG.supabaseUrl && CONFIG.supabaseAnonKey && CONFIG.loginEmail
   ? window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true } })
   : null;
 const BUCKET = 'photos';
@@ -147,22 +147,23 @@ function renderLogin() {
   $app.innerHTML = `
     <form class="login" id="login">
       <div class="brand">Cut<span>Folio</span></div>
-      <input class="field" id="email" type="email" placeholder="Email" autocomplete="username" autocapitalize="off" required>
-      <input class="field" id="password" type="password" placeholder="Password" autocomplete="current-password" required>
-      <button class="btn-primary" style="box-shadow:none" id="signin">Sign in</button>
+      <input type="email" id="email" autocomplete="username" value="${esc(CONFIG.loginEmail || '')}" hidden>
+      <input class="field" id="password" type="password" placeholder="Password" autocomplete="current-password" enterkeyhint="go" required>
+      <button class="btn-primary" style="box-shadow:none" id="signin">Unlock</button>
       <div class="error" id="loginError"></div>
     </form>`;
   document.getElementById('login').onsubmit = async (e) => {
     e.preventDefault();
     const btn = document.getElementById('signin');
-    btn.disabled = true; btn.textContent = 'Signing in…';
+    btn.disabled = true; btn.textContent = 'Unlocking…';
+    // The barber only types a password; the account email comes from config.js
     const { error } = await sb.auth.signInWithPassword({
-      email: document.getElementById('email').value.trim(),
+      email: CONFIG.loginEmail,
       password: document.getElementById('password').value,
     });
     if (error) {
-      document.getElementById('loginError').textContent = error.message === 'Invalid login credentials' ? 'Wrong email or password.' : error.message;
-      btn.disabled = false; btn.textContent = 'Sign in';
+      document.getElementById('loginError').textContent = error.message === 'Invalid login credentials' ? 'Wrong password.' : error.message;
+      btn.disabled = false; btn.textContent = 'Unlock';
     }
   };
 }
@@ -278,7 +279,7 @@ function renderHome() {
   document.getElementById('nextM').onclick = () => { if (monthOffset < 0) { monthOffset++; renderHome(); } };
   const so = document.getElementById('signout');
   so.onclick = async () => {
-    if (!so.dataset.armed) { so.dataset.armed = '1'; so.textContent = 'Tap again to sign out'; return; }
+    if (!so.dataset.armed) { so.dataset.armed = '1'; so.textContent = 'Tap again to lock (needs the password to reopen)'; return; }
     await sb.auth.signOut();
   };
 }
@@ -663,7 +664,7 @@ function renderSchedule() {
 
 // ---------- Boot ----------
 if (!sb) {
-  $app.innerHTML = `<div class="loading"><div style="text-align:center">CutFolio isn’t connected to its database yet.<br>Add the Supabase URL and anon key to <b>config.js</b>.</div></div>`;
+  $app.innerHTML = `<div class="loading"><div style="text-align:center">CutFolio isn’t connected to its database yet.<br>Add the Supabase URL, anon key, and login email to <b>config.js</b>.</div></div>`;
 } else {
   sb.auth.onAuthStateChange((_event, session) => { setTimeout(() => start(session), 0); });
 }

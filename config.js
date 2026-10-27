@@ -4,4 +4,7 @@
 window.CUTFOLIO_CONFIG = {
   supabaseUrl: '',
   supabaseAnonKey: '',
+  // The Supabase user the app signs in as. The barber only types the password,
+  // and stays signed in on his phone until he taps Sign out.
+  loginEmail: '',
 };
