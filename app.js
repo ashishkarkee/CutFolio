@@ -288,7 +288,7 @@ function renderHome() {
     <header class="masthead">
       <div class="row1">
         <div class="wordmark">Cut<span>Folio</span></div>
-        <div class="eyebrow">${now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</div>
+        <div class="today">${now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</div>
       </div>
       <div class="pole"></div>
     </header>

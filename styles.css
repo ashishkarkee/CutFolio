@@ -60,6 +60,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .masthead .row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .wordmark { font-family: var(--font-display); font-weight: 800; font-size: 40px; line-height: .9; letter-spacing: -.01em; text-transform: uppercase; }
 .wordmark span { color: var(--accent); }
+.masthead .today { font-family: var(--font-display); font-weight: 800; font-size: 22px; line-height: 1; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
 .topbar { display: flex; align-items: center; gap: 10px; min-height: 44px; }
 .topbar h1 { font-family: var(--font-display); font-weight: 800; font-size: 30px; text-transform: uppercase; letter-spacing: .01em; flex: 1; min-width: 0; }
 .icon-btn {
