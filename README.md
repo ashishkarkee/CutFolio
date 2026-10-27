@@ -16,7 +16,7 @@ It's plain HTML, CSS, and JavaScript with no build step. Data and photos are sto
 | `index.html`, `styles.css`, `app.js` | The app |
 | `config.js` | Supabase project URL and anon key |
 | `supabase/schema.sql` | Tables, photo bucket, and access rules |
-| `vendor/supabase.js` | supabase-js 2.45.4 (UMD build), bundled so the app doesn't depend on a CDN |
+| `vendor/supabase.js` | supabase-js 2.117.3 (UMD build), bundled so the app doesn't depend on a CDN |
 | `manifest.webmanifest`, `icons/` | Home Screen name and icon |
 
 ## Setup
@@ -25,7 +25,7 @@ It's plain HTML, CSS, and JavaScript with no build step. Data and photos are sto
 
 1. Create a free project at supabase.com.
 2. Open **SQL Editor → New query**, paste all of `supabase/schema.sql`, and press **Run**.
-3. Open **Authentication → Users → Add user → Create new user**. Enter any email you control and the app password, and check **Auto Confirm User**. The barber never types the email; he only enters the password.
+3. Open **Authentication → Users → Add user → Create new user**. Enter `barber@cutfolio.app` (or any email, as long as it matches `loginEmail` in `config.js`) and the app password, and check **Auto Confirm User**. The barber never types the email; he only enters the password.
 4. Open **Authentication → Sign In / Providers** and turn off **Allow new users to sign up**, so nobody else can make an account.
 5. Open **Project Settings → API** and copy the **Project URL** and the **anon public** key into `config.js`, along with the email from step 3 as `loginEmail`. Never use the `service_role` key in the app.
 
