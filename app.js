@@ -11,9 +11,10 @@ const URL_TTL = 60 * 60 * 24; // signed photo links last a day; refreshed on eac
 
 // Everything is loaded once after sign-in and kept in memory; writes go to
 // Supabase first and then update this copy.
-const data = { clients: [], cuts: [], photos: [] };
+const data = { clients: [], cuts: [], photos: [], appts: [] };
 const photoUrls = {}; // storage path -> signed URL
 let user = null;
+let scheduleReady = true; // false until the appointments table exists in Supabase
 
 async function fetchAll(table) {
   const rows = [];
@@ -28,12 +29,20 @@ async function fetchAll(table) {
 const toClient = r => ({ id: r.id, name: r.name, createdAt: r.created_at });
 const toCut = r => ({ id: r.id, clientId: r.client_id, date: new Date(r.date).toISOString(), price: Number(r.price), minutes: r.minutes, style: r.style, notes: r.notes });
 const toPhoto = r => ({ id: r.id, cutId: r.cut_id, clientId: r.client_id, path: r.path, thumbPath: r.thumb_path });
+const toAppt = r => ({ id: r.id, clientId: r.client_id, start: new Date(r.starts_at).toISOString(), minutes: r.minutes, notes: r.notes, cutId: r.cut_id });
 
 async function loadData() {
   const [clients, cuts, photos] = await Promise.all([fetchAll('clients'), fetchAll('cuts'), fetchAll('photos')]);
   data.clients = clients.map(toClient);
   data.cuts = cuts.map(toCut);
   data.photos = photos.map(toPhoto);
+  // The schedule is optional: if its table hasn't been added yet, the rest of the app still works
+  try {
+    data.appts = (await fetchAll('appointments')).map(toAppt);
+    scheduleReady = true;
+  } catch {
+    data.appts = []; scheduleReady = false;
+  }
   await signPaths(data.photos.flatMap(p => [p.path, p.thumbPath]));
 }
 async function signPaths(paths) {
@@ -86,6 +95,8 @@ const ICONS = {
   search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  minus: '<path d="M5 12h14"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
 };
 const icon = (name, cls = '') => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
@@ -161,6 +172,10 @@ function latestPhotoByClient() {
   return by;
 }
 const avatar = (client, photo) => `<div class="avatar">${photo ? `<img src="${esc(thumbUrl(photo))}" alt="" loading="lazy">` : esc(initials(client.name))}</div>`;
+const fmtTime = d => new Date(d).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+const dayKey = d => { d = new Date(d); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; };
+const startOfDay = d => { d = new Date(d); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); };
+const apptEnd = a => new Date(new Date(a.start).getTime() + a.minutes * 60000);
 const everyText = days => days < 10 ? `${Math.round(days)} days` : `${Math.round(days / 7)} weeks`;
 
 // ---------- Router ----------
@@ -171,10 +186,15 @@ const routes = [
   [/^#log(?:-([\w-]+))?$/, renderLog],
   [/^#schedule$/, renderSchedule],
 ];
+let clientBack = '#clients'; // where the back button on a client profile goes
+let lastHash = '';
 function route() {
   releaseUrls();
+  closeSheet();
   if (!user) return;
   const hash = location.hash || '#home';
+  if (hash.startsWith('#client-') && (lastHash === '#schedule' || lastHash === '#clients')) clientBack = lastHash;
+  lastHash = hash;
   for (const [re, fn] of routes) {
     const m = hash.match(re);
     if (m) { fn(...m.slice(1)); window.scrollTo(0, 0); return; }
@@ -296,7 +316,7 @@ function renderHome() {
     <div class="actions">
       <button class="btn btn-red btn-big" data-go="#log">${icon('scissors')}Log a cut</button>
       <button class="btn btn-tile" data-go="#clients">${icon('users')}Client portfolio</button>
-      <button class="btn btn-tile" data-go="#schedule">${icon('calendar')}View schedule</button>
+      <button class="btn btn-tile" data-go="#schedule">${icon('calendar')}View schedule${nextUpLine()}</button>
     </div>
 
     <div class="month">
@@ -413,9 +433,11 @@ function renderClient(id) {
   const s = clientStats(cuts);
   const history = [...cuts].sort((a, b) => b.date.localeCompare(a.date));
   const first = client.name.split(' ')[0];
+  const upcoming = data.appts.filter(a => a.clientId === id && !a.cutId && apptEnd(a) > new Date()).sort((a, b) => a.start.localeCompare(b.start))[0];
+  const nextBooking = upcoming ? `${dayLabel(upcoming.start)}, ${fmtTime(upcoming.start)}` : '';
 
   $app.innerHTML = `
-    ${topbar('', '#clients')}
+    ${topbar('', clientBack)}
     <div class="profile">
       ${avatar(client, mine[0])}
       <div style="min-width:0">
@@ -432,6 +454,7 @@ function renderClient(id) {
       <div><div class="eyebrow">Cuts</div><div class="num figure">${s.count}</div></div>
       <div><div class="eyebrow">Total spent</div><div class="num figure">${money(s.total)}</div></div>
     </section>
+    ${nextBooking ? `<div class="rhythm">${icon('calendar')}<span>Booked <b>${nextBooking}</b></span></div>` : ''}
     ${s.every ? `<div class="rhythm">${s.due ? '<span class="pill due">Due</span>' : ''}<span>Comes in about every <b>${everyText(s.every)}</b>. Last cut ${ago(s.last.date)}.</span></div>` : ''}
 
     <button class="btn btn-red" id="logFor">${icon('scissors')}Log a cut for ${esc(first)}</button>
@@ -495,6 +518,7 @@ function renderClient(id) {
     await removeFiles(ph);
     data.cuts = data.cuts.filter(c => c.id !== cutId);
     data.photos = data.photos.filter(p => p.cutId !== cutId);
+    data.appts.forEach(a => { if (a.cutId === cutId) a.cutId = null; });
     renderClient(id);
   });
 
@@ -512,6 +536,7 @@ function renderClient(id) {
     data.clients = data.clients.filter(c => c.id !== id);
     data.cuts = data.cuts.filter(c => c.clientId !== id);
     data.photos = data.photos.filter(p => p.clientId !== id);
+    data.appts = data.appts.filter(a => a.clientId !== id);
     toast(`Removed ${client.name}`);
     go('#clients');
   };
@@ -524,8 +549,11 @@ async function removeFiles(photos) {
 // ---------- Log cut ----------
 const PRICE_CHIPS = [25, 30, 35, 40, 50];
 const TIME_CHIPS = [20, 30, 45, 60];
+let apptToLog = null; // set when "Log this cut" is tapped on a booking
 function renderLog(presetId) {
   const { clients } = data;
+  const appt = apptToLog && apptToLog.clientId === presetId ? apptToLog : null;
+  apptToLog = null;
   const cutsBy = cutsByClient();
   const photoBy = latestPhotoByClient();
 
@@ -540,6 +568,7 @@ function renderLog(presetId) {
     date: toLocalInput(new Date()),
   };
   if (state.client) { state.mode = 'returning'; applyClientDefaults(); }
+  if (appt && !state.minutes) state.minutes = String(appt.minutes);
 
   function applyClientDefaults() {
     const s = clientStats(cutsBy[state.client.id] || []);
@@ -551,7 +580,7 @@ function renderLog(presetId) {
   }
 
   $app.innerHTML = `
-    ${topbar('Log a cut', presetId ? '#client-' + presetId : '#home')}
+    ${topbar('Log a cut', appt ? '#schedule' : presetId ? '#client-' + presetId : '#home')}
     <div class="seg" id="seg">
       <button data-mode="returning">Returning</button>
       <button data-mode="new">New client</button>
@@ -748,6 +777,11 @@ function renderLog(presetId) {
         minutes: cut.minutes, style: cut.style, notes: cut.notes,
       });
       if (cutErr) throw cutErr;
+      if (appt) {
+        // Mark the booking as done; the cut is saved either way
+        const { error } = await sb.from('appointments').update({ cut_id: cut.id }).eq('id', appt.id);
+        if (!error) appt.cutId = cut.id;
+      }
       if (photos.length) {
         const { error } = await sb.from('photos').insert(photos.map(p => ({ id: p.id, cut_id: p.cutId, client_id: p.clientId, path: p.path, thumb_path: p.thumbPath })));
         if (error) throw error;
@@ -761,7 +795,7 @@ function renderLog(presetId) {
       data.cuts.push(cut);
       data.photos.push(...photos);
       toast(`Saved ${money(price)} cut for ${client.name.split(' ')[0]}`);
-      go('#home');
+      go(appt ? '#schedule' : '#home');
     } catch (err) {
       btn.disabled = false; btn.textContent = 'Save cut';
       toast('Couldn’t save: ' + (err.message || err) + '. Check your connection and try again.', true);
@@ -775,13 +809,349 @@ function toLocalInput(d) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-// ---------- Schedule (placeholder, built last) ----------
+// ---------- Schedule ----------
+const DAY_OPEN = 9 * 60;            // first slot offered on an empty day, in minutes after midnight
+const LEN_CHIPS = [15, 30, 45, 60];
+let schedDay = startOfDay(new Date());
+
+function dayLabel(d) {
+  const diff = Math.round((startOfDay(d) - startOfDay(new Date())) / DAY_MS);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Tomorrow';
+  if (diff === -1) return 'Yesterday';
+  return new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+const apptsOn = day => data.appts.filter(a => dayKey(a.start) === dayKey(day)).sort((a, b) => a.start.localeCompare(b.start));
+
+// Projected length and price for a client, from their past cuts. New clients
+// get the shop-wide average length.
+function projection(clientId) {
+  const s = clientId ? clientStats(data.cuts.filter(c => c.clientId === clientId)) : null;
+  const shopAvg = avg(data.cuts.filter(c => c.minutes > 0).map(c => c.minutes));
+  const fromClient = s && s.avgMinutes;
+  const minutes = Math.max(5, Math.round((fromClient || shopAvg || 30) / 5) * 5);
+  return { minutes, price: s && s.count ? s.avgPrice : 0, basis: fromClient ? 'client' : shopAvg ? 'shop' : 'default', count: s ? s.count : 0 };
+}
+
+// Earliest start on `day` with room for `len` minutes, at or after `from` (minutes after midnight)
+function nextOpen(day, len, from) {
+  const base = startOfDay(day).getTime();
+  let t = from ?? DAY_OPEN;
+  if (dayKey(day) === dayKey(new Date())) {
+    const now = new Date();
+    t = Math.max(t, Math.ceil((now.getHours() * 60 + now.getMinutes()) / 15) * 15);
+  }
+  for (const a of apptsOn(day)) {
+    const aStart = (new Date(a.start) - base) / 60000, aEnd = aStart + a.minutes;
+    if (aStart < t + len && aEnd > t) t = aEnd;
+  }
+  return t;
+}
+
+// "Next: Marcus 2:30 PM" under the home button
+function nextUpLine() {
+  if (!scheduleReady) return '';
+  const now = new Date();
+  const next = data.appts.filter(a => !a.cutId && apptEnd(a) > now && dayKey(a.start) === dayKey(now))
+    .sort((a, b) => a.start.localeCompare(b.start))[0];
+  if (!next) return '';
+  const cl = data.clients.find(c => c.id === next.clientId);
+  return `<small class="next-up">Next: ${esc(cl ? cl.name.split(' ')[0] : 'client')} ${fmtTime(next.start)}</small>`;
+}
+
 function renderSchedule() {
+  if (!scheduleReady) {
+    $app.innerHTML = `
+      ${topbar('Schedule')}
+      <div class="placeholder">${icon('calendar')}<h2>One setup step</h2><p>Open Supabase → SQL Editor, paste <b>supabase/schedule.sql</b>, press Run, then reopen CutFolio.</p></div>`;
+    wireBack();
+    return;
+  }
+  const today = startOfDay(new Date());
+  const isToday = dayKey(schedDay) === dayKey(today);
+  // Week strip, Monday first
+  const monday = new Date(schedDay); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const week = Array.from({ length: 7 }, (_, i) => new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i));
+  const counts = {};
+  for (const a of data.appts) counts[dayKey(a.start)] = (counts[dayKey(a.start)] || 0) + 1;
+
+  const list = apptsOn(schedDay);
+  const clientBy = Object.fromEntries(data.clients.map(c => [c.id, c]));
+  const photoBy = latestPhotoByClient();
+  const projected = list.reduce((sum, a) => {
+    if (a.cutId) return sum + (data.cuts.find(c => c.id === a.cutId)?.price || 0);
+    return sum + projection(a.clientId).price;
+  }, 0);
+  const base = schedDay.getTime();
+
+  let rows = '';
+  list.forEach((a, i) => {
+    const prev = list[i - 1];
+    if (prev) {
+      const gap = (new Date(a.start) - apptEnd(prev)) / 60000;
+      if (gap >= 15) rows += `<button class="gap" data-at="${(apptEnd(prev) - base) / 60000}">${icon('plus')}Open ${fmtTime(apptEnd(prev))}, ${gap >= 60 ? (gap / 60).toFixed(1).replace('.0', '') + ' hr' : gap + ' min'}</button>`;
+    }
+    const cl = clientBy[a.clientId] || { name: 'Client', id: a.clientId };
+    const p = projection(a.clientId);
+    const cut = a.cutId && data.cuts.find(c => c.id === a.cutId);
+    const t = fmtTime(a.start).split(' ');
+    rows += `<button class="row appt${cut ? ' done' : ''}" data-appt="${a.id}">
+      <div class="when"><div class="t">${t[0]}</div><div class="m">${t[1] || ''}</div></div>
+      ${avatar(cl, photoBy[cl.id])}
+      <div class="main">
+        <div class="name">${esc(cl.name)}</div>
+        <div class="meta">${a.minutes} min · until ${fmtTime(apptEnd(a))}${a.notes ? ' · ' + esc(a.notes) : ''}</div>
+      </div>
+      <div class="right">${cut ? `<span class="pill ret">${icon('check')}${money(cut.price)}</span>` : p.price ? `<div class="num">${money(Math.round(p.price))}</div><div class="meta">usual</div>` : `<span class="pill new">New</span>`}</div>
+    </button>`;
+  });
+
   $app.innerHTML = `
-    ${topbar('Schedule')}
-    <div class="placeholder">${icon('calendar')}<h2>Coming soon</h2><p>Bookings and your week at a glance will live here.</p></div>
+    <div class="topbar"><button class="icon-btn" data-back="#home" aria-label="Back">${icon('left')}</button><h1>Schedule</h1>${isToday ? '' : `<button class="chip" id="toToday">Today</button>`}</div>
+    <div class="week">
+      <button class="icon-btn" id="prevW" aria-label="Previous week">${icon('left')}</button>
+      <div class="days">${week.map(d => `<button data-day="${d.getTime()}" class="${dayKey(d) === dayKey(schedDay) ? 'on' : ''}${dayKey(d) === dayKey(today) ? ' today' : ''}">
+        <span class="w">${DAYS[d.getDay()].slice(0, 2)}</span><span class="d">${d.getDate()}</span><span class="dots">${counts[dayKey(d)] ? (counts[dayKey(d)] > 9 ? '9+' : counts[dayKey(d)]) : ''}</span></button>`).join('')}</div>
+      <button class="icon-btn" id="nextW" aria-label="Next week">${icon('right')}</button>
+    </div>
+    <section class="card dayhead">
+      <div class="eyebrow">${['Today', 'Tomorrow', 'Yesterday'].includes(dayLabel(schedDay)) ? dayLabel(schedDay) : DAYS[schedDay.getDay()]}</div>
+      <h2>${schedDay.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</h2>
+      <div class="meta">${list.length
+        ? `<span>${plural(list.length, 'client')}</span><span>${fmtTime(list[0].start)} – ${fmtTime(apptEnd(list[list.length - 1]))}</span>${projected ? `<span>~${money(Math.round(projected))}</span>` : ''}`
+        : '<span>Nothing booked yet</span>'}</div>
+    </section>
+    ${list.length ? `<div class="group sched">${rows}</div>` : `<div class="group empty">Tap <b>Book a client</b> to fill this day.</div>`}
+    <div class="savebar"><button class="btn btn-red" id="book">${icon('plus')}Book a client</button></div>
   `;
   wireBack();
+  const $ = id => document.getElementById(id);
+  const shiftWeek = n => { schedDay = new Date(schedDay.getFullYear(), schedDay.getMonth(), schedDay.getDate() + n * 7); renderSchedule(); };
+  $('prevW').onclick = () => shiftWeek(-1);
+  $('nextW').onclick = () => shiftWeek(1);
+  if ($('toToday')) $('toToday').onclick = () => { schedDay = today; renderSchedule(); };
+  $app.querySelectorAll('[data-day]').forEach(b => b.onclick = () => { schedDay = new Date(+b.dataset.day); renderSchedule(); });
+  $app.querySelectorAll('[data-appt]').forEach(b => b.onclick = () => openBooking({ appt: data.appts.find(a => a.id === b.dataset.appt) }));
+  $app.querySelectorAll('[data-at]').forEach(b => b.onclick = () => openBooking({ at: +b.dataset.at }));
+  $('book').onclick = () => openBooking({});
+}
+
+function closeSheet() { document.querySelectorAll('.sheet-wrap').forEach(el => el.remove()); document.body.classList.remove('sheet-open'); }
+
+// One sheet for booking a new client and for changing an existing booking.
+// Booking keeps the sheet open and moves to the next open slot, so a whole day
+// can be filled in one go.
+function openBooking({ appt, at }) {
+  closeSheet();
+  const editing = !!appt;
+  const state = {
+    client: editing ? data.clients.find(c => c.id === appt.clientId) : null,
+    day: editing ? startOfDay(appt.start) : schedDay,
+    minutes: editing ? appt.minutes : projection(null).minutes,
+    lenSet: editing, // true once he picks a length, so choosing a client doesn't overwrite it
+    at: 0,
+    notes: editing ? appt.notes : '',
+    booked: [],
+  };
+  state.at = editing ? (new Date(appt.start) - startOfDay(appt.start)) / 60000 : nextOpen(state.day, state.minutes, at);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'sheet-wrap';
+  const first = state.client ? state.client.name.split(' ')[0] : '';
+  wrap.innerHTML = `
+    <div class="sheet-scrim"></div>
+    <div class="sheet" role="dialog" aria-label="${editing ? 'Booking' : 'Book a client'}">
+      <div class="sheet-head"><h2>${editing ? 'Booking' : 'Book a client'}</h2><button class="icon-btn" id="bClose" aria-label="Close">${icon('x')}</button></div>
+      ${editing ? `
+        <div class="who">
+          ${avatar(state.client || { name: '?' }, latestPhotoByClient()[appt.clientId])}
+          <div class="main"><div class="name">${esc(state.client?.name || 'Client')}</div><div class="meta" id="bWhoMeta"></div></div>
+        </div>
+        <div class="pair">
+          <button class="btn" id="bProfile">${icon('users')}View profile</button>
+          ${appt.cutId ? `<button class="btn" disabled>${icon('check')}Logged</button>` : `<button class="btn btn-red" id="bLog">${icon('scissors')}Log this cut</button>`}
+        </div>`
+      : `
+        <div class="done-line" id="bDone" hidden></div>
+        <div class="block">
+          <label class="label" for="bName">Client</label>
+          <input class="field" id="bName" placeholder="Name, new or returning" autocomplete="off" autocorrect="off" autocapitalize="words" enterkeyhint="done">
+          <div id="bSuggest"></div>
+          <div class="status" id="bStatus"></div>
+        </div>`}
+      <div class="block">
+        <span class="label">When</span>
+        <div class="when-row">
+          <input class="field" id="bDate" type="date" aria-label="Day">
+          <div class="stepper">
+            <button class="icon-btn" id="bEarlier" aria-label="15 minutes earlier">${icon('minus')}</button>
+            <input class="field" id="bTime" type="time" step="300" aria-label="Start time">
+            <button class="icon-btn" id="bLater" aria-label="15 minutes later">${icon('plus')}</button>
+          </div>
+        </div>
+      </div>
+      <div class="block">
+        <span class="label">Length (min)</span>
+        <div class="chips" id="bLen">${LEN_CHIPS.map(m => `<button class="chip" data-v="${m}">${m}</button>`).join('')}<button class="chip" data-v="other" id="bLenOther"></button></div>
+        <div class="projection" id="bProj"></div>
+        <div class="warn" id="bWarn"></div>
+      </div>
+      <input class="field" id="bNotes" placeholder="Note (optional)" autocapitalize="sentences">
+      <button class="btn btn-red" id="bSave">${editing ? 'Save changes' : 'Book'}</button>
+      ${editing ? `<button class="btn btn-danger" id="bRemove">Remove booking</button>` : ''}
+    </div>`;
+  document.body.appendChild(wrap);
+  document.body.classList.add('sheet-open');
+  const $ = id => wrap.querySelector('#' + id);
+  const close = () => { wrap.remove(); document.body.classList.remove('sheet-open'); };
+  wrap.querySelector('.sheet-scrim').onclick = close;
+  $('bClose').onclick = close;
+  const p2 = n => String(n).padStart(2, '0');
+  const startDate = () => new Date(state.day.getFullYear(), state.day.getMonth(), state.day.getDate(), 0, state.at);
+
+  function draw() {
+    $('bDate').value = `${state.day.getFullYear()}-${p2(state.day.getMonth() + 1)}-${p2(state.day.getDate())}`;
+    $('bTime').value = `${p2(Math.floor(state.at / 60) % 24)}:${p2(state.at % 60)}`;
+    const other = !LEN_CHIPS.includes(state.minutes);
+    $('bLen').querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.dataset.v === String(state.minutes) || (other && c.dataset.v === 'other')));
+    $('bLenOther').textContent = other ? `${state.minutes} min` : 'Other';
+    const p = projection(state.client?.id);
+    const end = new Date(startDate().getTime() + state.minutes * 60000);
+    const why = p.basis === 'client' ? `${first || state.client.name.split(' ')[0]} averages ${p.minutes} min` : p.basis === 'shop' ? `Your average cut is ${p.minutes} min` : '';
+    $('bProj').innerHTML = `${icon('clock')}<span>${fmtTime(startDate())} – <b>${fmtTime(end)}</b>${why ? ' · ' + why : ''}${p.price ? ` · usually ${money(Math.round(p.price))}` : ''}</span>`;
+    // Overlap check against the rest of that day
+    const s0 = startDate(), e0 = end;
+    const clash = apptsOn(state.day).filter(a => (!editing || a.id !== appt.id) && new Date(a.start) < e0 && apptEnd(a) > s0);
+    $('bWarn').textContent = clash.length ? `Overlaps ${clash.map(a => (data.clients.find(c => c.id === a.clientId)?.name.split(' ')[0] || 'a client') + ' at ' + fmtTime(a.start)).join(', ')}` : '';
+    if (editing) {
+      const st = clientStats(data.cuts.filter(c => c.clientId === appt.clientId));
+      $('bWhoMeta').textContent = st.last ? `${plural(st.count, 'cut')} · last ${ago(st.last.date)}` : 'No cuts yet';
+    }
+  }
+
+  $('bDate').onchange = e => {
+    const [y, m, d] = e.target.value.split('-').map(Number);
+    if (!y) return;
+    state.day = new Date(y, m - 1, d);
+    if (!editing) state.at = nextOpen(state.day, state.minutes);
+    draw();
+  };
+  $('bTime').onchange = e => {
+    const [h, m] = e.target.value.split(':').map(Number);
+    if (h >= 0) state.at = h * 60 + (m || 0);
+    draw();
+  };
+  $('bEarlier').onclick = () => { state.at = Math.max(0, Math.ceil(state.at / 15) * 15 - 15); draw(); };
+  $('bLater').onclick = () => { state.at = Math.min(23 * 60 + 45, Math.floor(state.at / 15) * 15 + 15); draw(); };
+  $('bLen').querySelectorAll('.chip').forEach(c => c.onclick = () => {
+    if (c.dataset.v === 'other') {
+      const v = parseInt(prompt('Length in minutes', state.minutes), 10);
+      if (v > 0 && v <= 600) state.minutes = v;
+    } else state.minutes = +c.dataset.v;
+    state.lenSet = true;
+    draw();
+  });
+  $('bNotes').value = state.notes;
+  $('bNotes').oninput = e => state.notes = e.target.value;
+
+  if (!editing) {
+    const nameEl = $('bName'), sugEl = $('bSuggest'), statusEl = $('bStatus');
+    const photoBy = latestPhotoByClient();
+    const pick = c => {
+      state.client = c;
+      nameEl.value = c.name;
+      sugEl.innerHTML = '';
+      if (!state.lenSet) state.minutes = projection(c.id).minutes;
+      nameEl.blur();
+      drawStatus(); draw();
+    };
+    function drawStatus() {
+      const typed = nameEl.value.trim();
+      if (state.client) {
+        const st = clientStats(data.cuts.filter(c => c.clientId === state.client.id));
+        statusEl.innerHTML = `<span class="pill ret">${icon('check')}${st.count ? `Returning · ${plural(st.count, 'cut')}` : 'In your portfolio'}</span>`;
+      } else statusEl.innerHTML = typed && !sugEl.childElementCount ? `<span class="pill new">${icon('plus')}New client</span>` : '';
+      statusEl.querySelectorAll('.ico').forEach(i => { i.style.width = '14px'; i.style.height = '14px'; i.style.strokeWidth = '2.6'; });
+    }
+    nameEl.oninput = () => {
+      if (state.client && nameEl.value !== state.client.name) {
+        state.client = null;
+        if (!state.lenSet) state.minutes = projection(null).minutes;
+        draw();
+      }
+      const q = norm(nameEl.value);
+      const hits = q ? data.clients.filter(c => norm(c.name).includes(q))
+        .sort((a, b) => (norm(b.name).startsWith(q) - norm(a.name).startsWith(q)) || a.name.localeCompare(b.name)).slice(0, 4) : [];
+      const exact = hits.length === 1 && norm(hits[0].name) === q;
+      sugEl.innerHTML = hits.length && !exact ? `<div class="group suggest">${hits.map(c => {
+        const p = projection(c.id);
+        return `<button class="row" data-id="${c.id}">${avatar(c, photoBy[c.id])}<div class="main"><div class="name">${esc(c.name)}</div><div class="meta">${p.basis === 'client' ? p.minutes + ' min usually' : 'no timed cuts yet'}</div></div></button>`;
+      }).join('')}</div>` : '';
+      sugEl.querySelectorAll('[data-id]').forEach(b => b.addEventListener('pointerdown', e => { e.preventDefault(); pick(data.clients.find(c => c.id === b.dataset.id)); }));
+      if (exact) pick(hits[0]); else drawStatus();
+    };
+    setTimeout(() => nameEl.focus(), 60);
+  } else {
+    $('bProfile').onclick = () => { close(); go('#client-' + appt.clientId); };
+    if ($('bLog')) $('bLog').onclick = () => { apptToLog = appt; close(); go('#log-' + appt.clientId); };
+    const rm = $('bRemove');
+    rm.onclick = async () => {
+      if (!rm.dataset.armed) { rm.dataset.armed = '1'; rm.classList.add('armed'); rm.textContent = 'Tap again to remove'; return; }
+      rm.disabled = true;
+      const { error } = await sb.from('appointments').delete().eq('id', appt.id);
+      if (error) { rm.disabled = false; return toast('Couldn’t remove: ' + error.message, true); }
+      data.appts = data.appts.filter(a => a.id !== appt.id);
+      close(); renderSchedule();
+    };
+  }
+
+  $('bSave').onclick = async () => {
+    const btn = $('bSave');
+    const starts = startDate().toISOString();
+    if (editing) {
+      btn.disabled = true; btn.textContent = 'Saving…';
+      const { error } = await sb.from('appointments').update({ starts_at: starts, minutes: state.minutes, notes: state.notes.trim() }).eq('id', appt.id);
+      if (error) { btn.disabled = false; btn.textContent = 'Save changes'; return toast('Couldn’t save: ' + error.message, true); }
+      Object.assign(appt, { start: starts, minutes: state.minutes, notes: state.notes.trim() });
+      schedDay = state.day;
+      close(); renderSchedule();
+      return;
+    }
+    const nameEl = $('bName');
+    const typed = nameEl.value.trim();
+    if (!state.client && !typed) { nameEl.focus(); return toast('Add a client name', true); }
+    btn.disabled = true; btn.textContent = 'Booking…';
+    try {
+      let client = state.client || data.clients.find(c => norm(c.name) === norm(typed));
+      if (!client) {
+        client = { id: uuid(), name: typed, createdAt: new Date().toISOString() };
+        const { error } = await sb.from('clients').insert({ id: client.id, name: client.name });
+        if (error) throw error;
+        data.clients.push(client);
+      }
+      const a = { id: uuid(), clientId: client.id, start: starts, minutes: state.minutes, notes: state.notes.trim(), cutId: null };
+      const { error } = await sb.from('appointments').insert({ id: a.id, client_id: a.clientId, starts_at: a.start, minutes: a.minutes, notes: a.notes });
+      if (error) throw error;
+      data.appts.push(a);
+      // Ready for the next one, right after this booking
+      schedDay = state.day;
+      renderSchedule();
+      state.booked.push(`${client.name.split(' ')[0]} ${fmtTime(a.start)}`);
+      state.client = null; state.notes = ''; state.lenSet = false;
+      state.minutes = projection(null).minutes;
+      state.at = nextOpen(state.day, state.minutes, (apptEnd(a) - startOfDay(a.start)) / 60000);
+      nameEl.value = ''; $('bNotes').value = ''; $('bSuggest').innerHTML = ''; $('bStatus').innerHTML = '';
+      $('bDone').hidden = false;
+      $('bDone').innerHTML = `${icon('check')}<span>Booked ${esc(state.booked.join(', '))}. Add the next one or close.</span>`;
+      draw();
+      nameEl.focus();
+    } catch (err) {
+      toast('Couldn’t book: ' + (err.message || err) + '. Check your connection and try again.', true);
+    }
+    btn.disabled = false; btn.textContent = 'Book';
+  };
+
+  draw();
 }
 
 // ---------- Boot ----------

@@ -5,7 +5,7 @@ A private web app for one independent barber, built for iPhone Safari.
 - **Home:** monthly revenue, total customers, new vs returning clients, and best day.
 - **Log cut:** pick a returning client by typing their name (or add a new one), take or upload photos, tap a price and time, save.
 - **Client portfolio:** searchable list of clients. Each profile has past cut photos, average price, average time, and transaction history.
-- **View schedule:** coming later.
+- **View schedule:** a week strip and the day's bookings. Book a client by name and the length is projected from their average cut time (or your shop average for new clients); the next open slot is filled in for you, and the sheet stays open so you can book a whole day in a row. Tap a booking to view the client's profile, log the cut, move it, or remove it.
 
 It's plain HTML, CSS, and JavaScript with no build step. Data and photos are stored in [Supabase](https://supabase.com), and only the signed-in barber can read them.
 
@@ -16,6 +16,7 @@ It's plain HTML, CSS, and JavaScript with no build step. Data and photos are sto
 | `index.html`, `styles.css`, `app.js` | The app |
 | `config.js` | Supabase project URL and anon key |
 | `supabase/schema.sql` | Tables, photo bucket, and access rules |
+| `supabase/schedule.sql` | Just the appointments table, for databases set up before the schedule existed |
 | `vendor/supabase.js` | supabase-js 2.117.3 (UMD build), bundled so the app doesn't depend on a CDN |
 | `manifest.webmanifest`, `icons/` | Home Screen name and icon |
 

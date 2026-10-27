@@ -37,10 +37,24 @@ create table if not exists public.photos (
 );
 create index if not exists photos_cut_id_idx on public.photos (cut_id);
 
+-- Appointments (the schedule). cut_id is set once the booked cut is logged.
+create table if not exists public.appointments (
+  id          uuid primary key default gen_random_uuid(),
+  owner       uuid not null default auth.uid() references auth.users on delete cascade,
+  client_id   uuid not null references public.clients on delete cascade,
+  starts_at   timestamptz not null,
+  minutes     integer not null default 30,
+  notes       text not null default '',
+  cut_id      uuid references public.cuts on delete set null,
+  created_at  timestamptz not null default now()
+);
+create index if not exists appointments_starts_at_idx on public.appointments (starts_at);
+
 -- Only the signed-in owner can see or change their own rows ------------------
 alter table public.clients enable row level security;
 alter table public.cuts    enable row level security;
 alter table public.photos  enable row level security;
+alter table public.appointments enable row level security;
 
 drop policy if exists "Owner only" on public.clients;
 create policy "Owner only" on public.clients for all to authenticated
@@ -52,6 +66,10 @@ create policy "Owner only" on public.cuts for all to authenticated
 
 drop policy if exists "Owner only" on public.photos;
 create policy "Owner only" on public.photos for all to authenticated
+  using (owner = (select auth.uid())) with check (owner = (select auth.uid()));
+
+drop policy if exists "Owner only" on public.appointments;
+create policy "Owner only" on public.appointments for all to authenticated
   using (owner = (select auth.uid())) with check (owner = (select auth.uid()));
 
 -- Private photo bucket. Files are stored under <user id>/..., and each user
