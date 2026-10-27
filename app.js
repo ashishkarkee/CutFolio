@@ -336,8 +336,8 @@ function renderHome() {
         ? `${newCount ? `<div class="a" style="flex:${newCount}"></div>` : ''}${retCount ? `<div class="b" style="flex:${retCount}"></div>` : ''}`
         : ''}</div>
       <div class="split-legend">
-        <div><span class="num figure">${newCount}</span><span class="k"><i class="swatch" style="background:var(--red)"></i>New</span></div>
-        <div><span class="num figure">${retCount}</span><span class="k">Returning<i class="swatch" style="background:var(--blue)"></i></span></div>
+        <div><span class="num figure">${newCount}</span><span class="k"><i class="swatch" style="background:var(--accent)"></i>New</span></div>
+        <div><span class="num figure">${retCount}</span><span class="k">Returning<i class="swatch" style="background:var(--alt)"></i></span></div>
       </div>
     </section>
 
