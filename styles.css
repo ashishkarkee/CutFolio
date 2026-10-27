@@ -1,19 +1,19 @@
 /* CutFolio — a shop ledger for one barber.
    Layout: single column, phone first. Summary on top, detail below.
-   Identity: deep barbershop green like a vintage chair, brass for the
+   Identity: barbershop green walls, black cards, brass for the
    things to tap, condensed sign-painter numerals for every figure. */
 :root {
-  --bg: #0c1c16;
-  --surface: #12271f;
-  --surface-2: #1a3329;
-  --line: #24402f;
+  --bg: #133a2c;
+  --surface: #0b0b0b;
+  --surface-2: #1d1d1d;
+  --line: #2a2a2a;
   --ink: #eee9dc;
-  --muted: #9bb0a3;
+  --muted: #a5a39b;
   --accent: #d9b26a;        /* brass */
   --accent-soft: #33301f;
   --on-accent: #10200f;
   --alt: #8fcfaa;           /* sage, for returning clients */
-  --alt-soft: #193a2b;
+  --alt-soft: #16261e;
   --danger: #ec7b6c;
   --danger-soft: #3a2420;
   --good: #8fcfaa;
