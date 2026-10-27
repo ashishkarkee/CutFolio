@@ -57,8 +57,38 @@ const fmtDate = iso => new Date(iso).toLocaleDateString('en-US', { month: 'short
 const fmtShort = iso => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 const avg = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 const norm = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const DAY_MS = 864e5;
 const uuid = () => crypto.randomUUID ? crypto.randomUUID()
   : '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+
+// "today", "yesterday", "5 days ago", "3 wks ago", "2 mo ago"
+function ago(iso) {
+  const startOf = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const days = Math.round((startOf(new Date()) - startOf(new Date(iso))) / DAY_MS);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 14) return `${days} days ago`;
+  if (days < 60) return `${Math.round(days / 7)} wks ago`;
+  if (days < 365) return `${Math.round(days / 30)} mo ago`;
+  return `${(days / 365).toFixed(1).replace('.0', '')} yr ago`;
+}
+
+// Line icons, drawn on a 24px grid
+const ICONS = {
+  scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.6 7.6 20 19M8.6 16.4 20 5"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M18 14.8c2 .7 3.2 2.4 3.5 5.2"/>',
+  camera: '<path d="M4 8h3l1.6-2.5h6.8L17 8h3a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.6"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="9.5" r="1.8"/><path d="m3.5 18 5.5-5.5 4 4 2.5-2.5 5 5"/>',
+  left: '<path d="M15 5 8 12l7 7"/>',
+  right: '<path d="m9 5 7 7-7 7"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/>',
+  x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+};
+const icon = (name, cls = '') => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
 
 let liveUrls = [];
 function blobUrl(blob) { const u = URL.createObjectURL(blob); liveUrls.push(u); return u; }
@@ -66,15 +96,16 @@ function releaseUrls() { liveUrls.forEach(u => URL.revokeObjectURL(u)); liveUrls
 
 function toast(msg, isError) {
   const el = document.createElement('div');
-  el.className = 'toast' + (isError ? ' err' : ''); el.textContent = msg;
+  el.className = 'toast' + (isError ? ' err' : '');
+  el.innerHTML = (isError ? '' : icon('check')) + `<span>${esc(msg)}</span>`;
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), isError ? 4000 : 1800);
+  setTimeout(() => el.remove(), isError ? 4000 : 2000);
 }
 
 function openViewer(src, caption) {
   const el = document.createElement('div');
   el.className = 'viewer';
-  el.innerHTML = `<button class="close" aria-label="Close">✕</button><img src="${esc(src)}" alt=""><div class="cap">${esc(caption)}</div>`;
+  el.innerHTML = `<button class="close" aria-label="Close">${icon('x')}</button><img src="${esc(src)}" alt=""><div class="cap">${esc(caption)}</div>`;
   el.addEventListener('click', () => el.remove());
   document.body.appendChild(el);
 }
@@ -98,6 +129,11 @@ async function shrink(file, maxSide, quality) {
 function clientStats(cuts) {
   const sorted = [...cuts].sort((a, b) => b.date.localeCompare(a.date));
   const timed = cuts.filter(c => c.minutes > 0).map(c => c.minutes);
+  // Average days between visits, once there are at least two
+  const gaps = [];
+  for (let i = 0; i < sorted.length - 1; i++) gaps.push((new Date(sorted[i].date) - new Date(sorted[i + 1].date)) / DAY_MS);
+  const every = gaps.length ? avg(gaps) : 0;
+  const sinceLast = sorted[0] ? (Date.now() - new Date(sorted[0].date)) / DAY_MS : 0;
   return {
     count: cuts.length,
     total: cuts.reduce((s, c) => s + (c.price || 0), 0),
@@ -105,6 +141,9 @@ function clientStats(cuts) {
     avgMinutes: avg(timed),
     last: sorted[0],
     first: sorted[sorted.length - 1],
+    every,
+    // Overdue once it's been noticeably longer than his usual gap
+    due: every >= 7 && sinceLast > every * 1.25,
   };
 }
 function cutsByClient() {
@@ -112,6 +151,17 @@ function cutsByClient() {
   for (const c of data.cuts) (by[c.clientId] ||= []).push(c);
   return by;
 }
+function latestPhotoByClient() {
+  const cutDate = Object.fromEntries(data.cuts.map(c => [c.id, c.date]));
+  const by = {};
+  for (const p of data.photos) {
+    const cur = by[p.clientId];
+    if (!cur || (cutDate[p.cutId] || '') > (cutDate[cur.cutId] || '')) by[p.clientId] = p;
+  }
+  return by;
+}
+const avatar = (client, photo) => `<div class="avatar">${photo ? `<img src="${esc(thumbUrl(photo))}" alt="" loading="lazy">` : esc(initials(client.name))}</div>`;
+const everyText = days => days < 10 ? `${Math.round(days)} days` : `${Math.round(days / 7)} weeks`;
 
 // ---------- Router ----------
 const routes = [
@@ -135,7 +185,7 @@ window.addEventListener('hashchange', route);
 const go = h => { location.hash = h; };
 
 function topbar(title, fallback = '#home') {
-  return `<div class="topbar"><button class="back" data-back="${fallback}" aria-label="Back">‹</button><h1>${esc(title)}</h1></div>`;
+  return `<div class="topbar"><button class="icon-btn" data-back="${fallback}" aria-label="Back">${icon('left')}</button><h1>${esc(title)}</h1></div>`;
 }
 function wireBack() {
   const b = $app.querySelector('[data-back]');
@@ -146,10 +196,11 @@ function wireBack() {
 function renderLogin() {
   $app.innerHTML = `
     <form class="login" id="login">
-      <div class="brand">Cut<span>Folio</span></div>
+      <div class="wordmark">Cut<span>Folio</span></div>
+      <div class="pole"></div>
       <input type="email" id="email" autocomplete="username" value="${esc(CONFIG.loginEmail || '')}" hidden>
       <input class="field" id="password" type="password" placeholder="Password" autocomplete="current-password" enterkeyhint="go" required>
-      <button class="btn-primary" style="box-shadow:none" id="signin">Unlock</button>
+      <button class="btn btn-red" id="signin">Unlock</button>
       <div class="error" id="loginError"></div>
     </form>`;
   document.getElementById('login').onsubmit = async (e) => {
@@ -176,7 +227,7 @@ async function start(session) {
   try {
     await loadData();
   } catch (err) {
-    $app.innerHTML = `<div class="loading"><div style="text-align:center">Couldn’t load your data.<br>${esc(err.message)}<br><button class="linkbtn" onclick="location.reload()">Try again</button></div></div>`;
+    $app.innerHTML = `<div class="loading"><div>Couldn’t load your data.<br>${esc(err.message)}<br><button class="linkbtn" onclick="location.reload()">Try again</button></div></div>`;
     return;
   }
   route();
@@ -191,11 +242,14 @@ function renderHome() {
   const start = ref, end = new Date(ref.getFullYear(), ref.getMonth() + 1, 1);
   const prevStart = new Date(ref.getFullYear(), ref.getMonth() - 1, 1);
   const inRange = (c, a, b) => { const d = new Date(c.date); return d >= a && d < b; };
+  const isCurrent = monthOffset === 0;
 
   const monthCuts = cuts.filter(c => inRange(c, start, end));
-  const prevCuts = cuts.filter(c => inRange(c, prevStart, start));
   const revenue = monthCuts.reduce((s, c) => s + (c.price || 0), 0);
-  const prevRevenue = prevCuts.reduce((s, c) => s + (c.price || 0), 0);
+  // Compare against the same stretch of last month, so the 5th isn't judged against a whole month
+  const daysIn = (end - start) / DAY_MS | 0;
+  const prevCutoff = isCurrent ? new Date(prevStart.getFullYear(), prevStart.getMonth(), now.getDate() + 1) : start;
+  const prevRevenue = cuts.filter(c => inRange(c, prevStart, prevCutoff < start ? prevCutoff : start)).reduce((s, c) => s + (c.price || 0), 0);
 
   // First visit per client decides new vs returning
   const firstVisit = {};
@@ -203,75 +257,100 @@ function renderHome() {
   const monthClients = [...new Set(monthCuts.map(c => c.clientId))];
   const newCount = monthClients.filter(id => inRange({ date: firstVisit[id] }, start, end)).length;
   const retCount = monthClients.length - newCount;
-  const newPct = monthClients.length ? (newCount / monthClients.length) * 100 : 50;
 
-  // Best weekday (by revenue) in the selected month, plus best single date
+  // Revenue by day of month and by weekday
+  const byDay = Array(daysIn).fill(0);
   const byWeekday = Array(7).fill(0);
-  const byDate = {};
   for (const c of monthCuts) {
     const d = new Date(c.date);
+    byDay[d.getDate() - 1] += c.price || 0;
     byWeekday[d.getDay()] += c.price || 0;
-    const key = d.toDateString();
-    byDate[key] = (byDate[key] || 0) + (c.price || 0);
   }
+  const maxDay = Math.max(...byDay);
   const maxW = Math.max(...byWeekday);
   const bestW = maxW > 0 ? byWeekday.indexOf(maxW) : -1;
-  const bestDate = Object.entries(byDate).sort((a, b) => b[1] - a[1])[0];
+  const weekdayCount = Array(7).fill(0); // how many of each weekday he worked, for a per-day average
+  const worked = new Set(monthCuts.map(c => new Date(c.date).toDateString()));
+  worked.forEach(ds => weekdayCount[new Date(ds).getDay()]++);
 
-  let change = '';
+  let delta = '';
   if (prevRevenue > 0) {
     const pct = Math.round(((revenue - prevRevenue) / prevRevenue) * 100);
-    change = `<span class="${pct >= 0 ? 'up' : 'down'}">${pct >= 0 ? '▲' : '▼'} ${Math.abs(pct)}%</span> vs last month`;
+    delta = `<span class="delta ${pct >= 0 ? 'up' : 'down'}">${pct >= 0 ? '+' : '−'}${Math.abs(pct)}%</span><span>vs ${isCurrent ? 'this point last month' : 'the month before'}</span>`;
   } else {
-    change = `${monthCuts.length} cut${monthCuts.length === 1 ? '' : 's'}`;
+    delta = `<span>${plural(monthCuts.length, 'cut')}</span>`;
   }
-  const monthLabel = ref.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const monthName = ref.toLocaleDateString('en-US', { month: 'long' });
   const order = [1, 2, 3, 4, 5, 6, 0];
+  const today = now.getDate();
 
   $app.innerHTML = `
-    <div class="topbar"><div class="brand">Cut<span>Folio</span></div></div>
+    <header class="masthead">
+      <div class="row1">
+        <div class="wordmark">Cut<span>Folio</span></div>
+        <div class="eyebrow">${now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</div>
+      </div>
+      <div class="pole"></div>
+    </header>
+
     <div class="actions">
-      <button class="action" data-go="#schedule"><span class="ico">📅</span>View schedule</button>
-      <button class="action" data-go="#clients"><span class="ico">👥</span>Client portfolio</button>
-      <button class="action primary" data-go="#log"><span class="ico">✂️</span>Log cut</button>
+      <button class="btn btn-red btn-big" data-go="#log">${icon('scissors')}Log a cut</button>
+      <button class="btn btn-tile" data-go="#clients">${icon('users')}Client portfolio</button>
+      <button class="btn btn-tile" data-go="#schedule">${icon('calendar')}View schedule</button>
     </div>
 
-    <div class="month-switch">
-      <button id="prevM" aria-label="Previous month">‹</button>
-      <h2>${monthLabel}</h2>
-      <button id="nextM" aria-label="Next month" ${monthOffset >= 0 ? 'disabled' : ''}>›</button>
+    <div class="month">
+      <h2>${monthName}<small>${ref.getFullYear()}</small></h2>
+      <button class="icon-btn" id="prevM" aria-label="Previous month">${icon('left')}</button>
+      <button class="icon-btn" id="nextM" aria-label="Next month" ${isCurrent ? 'disabled' : ''}>${icon('right')}</button>
     </div>
 
-    <div class="grid2">
-      <div class="card metric wide">
-        <div class="label">Monthly revenue</div>
-        <div class="value">${money(revenue)}</div>
-        <div class="sub">${change}</div>
-      </div>
-      <div class="card metric">
-        <div class="label">Total customers</div>
-        <div class="value">${clients.length}</div>
-        <div class="sub">all time</div>
-      </div>
-      <div class="card metric">
-        <div class="label">Cuts this month</div>
-        <div class="value">${monthCuts.length}</div>
-        <div class="sub">${monthCuts.length ? 'avg ' + money(revenue / monthCuts.length) : '—'}</div>
-      </div>
-      <div class="card metric wide">
-        <div class="label">New vs returning</div>
-        <div class="value">${newCount} <span style="color:var(--muted);font-weight:500">/</span> ${retCount}</div>
-        <div class="split">${monthClients.length ? `<div class="a" style="width:${newPct}%"></div><div class="b" style="width:${100 - newPct}%"></div>` : ''}</div>
-        <div class="legend"><span><i class="dot" style="background:var(--accent)"></i>New ${newCount}</span><span><i class="dot" style="background:#6b8cff"></i>Returning ${retCount}</span></div>
-      </div>
-      <div class="card metric wide">
-        <div class="label">Best day</div>
-        <div class="value">${bestW >= 0 ? DAYS[bestW] : '—'}</div>
-        <div class="sub">${bestW >= 0 ? money(maxW) + ' on ' + DAYS[bestW] + 's' + (bestDate ? ` · top date ${fmtShort(bestDate[0])} (${money(bestDate[1])})` : '') : 'Log a few cuts to see your best day'}</div>
-        <div class="bars">${order.map(i => `<div><i class="${i === bestW ? 'top' : ''}" style="height:${maxW ? Math.max(4, (byWeekday[i] / maxW) * 100) : 4}%"></i><span>${DAYS[i][0]}</span></div>`).join('')}</div>
-      </div>
+    <section class="card hero">
+      <div class="eyebrow">Revenue</div>
+      <div class="num figure">${money(revenue)}</div>
+      <div class="meta">${delta}</div>
+      <div class="daybars" aria-hidden="true">${byDay.map((v, i) => {
+        const future = isCurrent && i + 1 > today;
+        const cls = isCurrent && i + 1 === today ? 'today' : v ? 'has' : future ? 'future' : '';
+        return `<i class="${cls}" style="height:${maxDay ? Math.max(3, (v / maxDay) * 100) : 3}%"></i>`;
+      }).join('')}</div>
+      <div class="dayaxis"><span>1</span><span>${Math.ceil(daysIn / 2)}</span><span>${daysIn}</span></div>
+    </section>
+
+    <div class="pair">
+      <section class="card stat">
+        <div class="eyebrow">Customers</div>
+        <div class="num figure">${clients.length}</div>
+        <div class="sub">${monthClients.length} came in ${isCurrent ? 'this month' : 'in ' + monthName}</div>
+      </section>
+      <section class="card stat">
+        <div class="eyebrow">Cuts</div>
+        <div class="num figure">${monthCuts.length}</div>
+        <div class="sub">${monthCuts.length ? money(revenue / monthCuts.length) + ' avg ticket' : 'none yet'}</div>
+      </section>
     </div>
-    ${cuts.length === 0 ? `<p class="hint">Tap <b>Log cut</b> to add your first client.</p>` : ''}
+
+    <section class="card">
+      <div class="eyebrow">New vs returning</div>
+      <div class="split">${monthClients.length
+        ? `${newCount ? `<div class="a" style="flex:${newCount}"></div>` : ''}${retCount ? `<div class="b" style="flex:${retCount}"></div>` : ''}`
+        : ''}</div>
+      <div class="split-legend">
+        <div><span class="num figure">${newCount}</span><span class="k"><i class="swatch" style="background:var(--red)"></i>New</span></div>
+        <div><span class="num figure">${retCount}</span><span class="k">Returning<i class="swatch" style="background:var(--blue)"></i></span></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="eyebrow">Best day</div>
+      <div class="num best-day">${bestW >= 0 ? DAYS[bestW] : '—'}</div>
+      <div class="sub muted" style="font-size:14px;margin-top:6px">${bestW >= 0
+        ? `${money(maxW)} across ${plural(weekdayCount[bestW], DAYS[bestW])}, about ${money(maxW / Math.max(1, weekdayCount[bestW]))} a day`
+        : 'Log a few cuts to see which day earns most.'}</div>
+      <div class="weekbars" aria-hidden="true">${order.map(i => `<div><i class="${i === bestW ? 'best' : ''}" style="height:${maxW ? Math.max(4, (byWeekday[i] / maxW) * 100) : 4}%"></i><span class="${i === bestW ? 'best' : ''}">${DAYS[i].slice(0, 2)}</span></div>`).join('')}</div>
+    </section>
+
+    ${cuts.length === 0 ? `<p class="hint">Tap <b>Log a cut</b> to add your first client.</p>` : ''}
     <button class="signout" id="signout">Sign out</button>
   `;
   $app.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go));
@@ -279,45 +358,42 @@ function renderHome() {
   document.getElementById('nextM').onclick = () => { if (monthOffset < 0) { monthOffset++; renderHome(); } };
   const so = document.getElementById('signout');
   so.onclick = async () => {
-    if (!so.dataset.armed) { so.dataset.armed = '1'; so.textContent = 'Tap again to lock (needs the password to reopen)'; return; }
+    if (!so.dataset.armed) { so.dataset.armed = '1'; so.textContent = 'Tap again to sign out (needs the password to reopen)'; return; }
     await sb.auth.signOut();
   };
 }
 
 // ---------- Client portfolio ----------
 function renderClients() {
-  const { clients, cuts, photos } = data;
   const cutsBy = cutsByClient();
-  const cutDate = Object.fromEntries(cuts.map(c => [c.id, c.date]));
-  const photoBy = {}; // latest photo per client
-  for (const p of photos) {
-    const cur = photoBy[p.clientId];
-    if (!cur || (cutDate[p.cutId] || '') > (cutDate[cur.cutId] || '')) photoBy[p.clientId] = p;
-  }
-  const rows = clients.map(cl => ({ cl, s: clientStats(cutsBy[cl.id] || []) }))
+  const photoBy = latestPhotoByClient();
+  const rows = data.clients.map(cl => ({ cl, s: clientStats(cutsBy[cl.id] || []) }))
     .sort((a, b) => (b.s.last?.date || b.cl.createdAt).localeCompare(a.s.last?.date || a.cl.createdAt));
 
   $app.innerHTML = `
-    ${topbar('Client portfolio')}
-    <input class="search" id="q" type="search" placeholder="Search clients" autocomplete="off" autocorrect="off">
-    <div class="list" id="list"></div>
+    ${topbar('Clients')}
+    <label class="search">${icon('search')}<input id="q" type="search" placeholder="Search by name or style" autocomplete="off" autocorrect="off"></label>
+    <div class="count-line" id="count"></div>
+    <div id="list"></div>
   `;
   wireBack();
-  const list = document.getElementById('list');
+  const list = document.getElementById('list'), count = document.getElementById('count');
   const draw = (q) => {
     const nq = norm(q);
     const hits = rows.filter(r => !nq || norm(r.cl.name).includes(nq) || norm(r.s.last?.style || '').includes(nq));
-    if (!rows.length) { list.innerHTML = `<div class="empty">No clients yet.<br><button class="linkbtn" data-go="#log">Log your first cut</button></div>`; }
-    else if (!hits.length) { list.innerHTML = `<div class="empty">No one named “${esc(q)}”.</div>`; }
-    else list.innerHTML = hits.map(({ cl, s }) => {
-      const p = photoBy[cl.id];
-      return `<button class="row" data-id="${cl.id}">
-        <div class="avatar">${p ? `<img src="${esc(thumbUrl(p))}" alt="" loading="lazy">` : esc(initials(cl.name))}</div>
-        <div class="main"><div class="name">${esc(cl.name)}</div>
-          <div class="meta">${s.count} cut${s.count === 1 ? '' : 's'}${s.last ? ' · last ' + fmtShort(s.last.date) : ''}</div></div>
-        <div class="right">${s.count ? money(s.avgPrice) : ''}<div class="meta" style="font-weight:400">${s.count ? 'avg' : ''}</div></div>
-      </button>`;
-    }).join('');
+    count.textContent = rows.length ? (nq ? `${hits.length} of ${plural(rows.length, 'client')}` : `${plural(rows.length, 'client')}, most recent first`) : '';
+    if (!rows.length) list.innerHTML = `<div class="group empty">No clients yet.<br><button class="linkbtn" data-go="#log">Log your first cut</button></div>`;
+    else if (!hits.length) list.innerHTML = `<div class="group empty">No one matches “${esc(q)}”.</div>`;
+    else list.innerHTML = `<div class="group">${hits.map(({ cl, s }) => `
+      <button class="row" data-id="${cl.id}">
+        ${avatar(cl, photoBy[cl.id])}
+        <div class="main">
+          <div class="name">${esc(cl.name)}</div>
+          <div class="meta">${s.last ? `${plural(s.count, 'cut')} · ${ago(s.last.date)}` : 'No cuts yet'}</div>
+        </div>
+        ${s.due ? '<span class="pill due">Due</span>' : ''}
+        <div class="right">${s.count ? `<div class="num">${money(s.avgPrice)}</div><div class="meta">avg</div>` : ''}</div>
+      </button>`).join('')}</div>`;
     list.querySelectorAll('[data-id]').forEach(b => b.onclick = () => go('#client-' + b.dataset.id));
     list.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go));
   };
@@ -336,37 +412,51 @@ function renderClient(id) {
     .sort((a, b) => (cutById[b.cutId]?.date || '').localeCompare(cutById[a.cutId]?.date || ''));
   const s = clientStats(cuts);
   const history = [...cuts].sort((a, b) => b.date.localeCompare(a.date));
-  const cover = mine[0];
+  const first = client.name.split(' ')[0];
 
   $app.innerHTML = `
     ${topbar('', '#clients')}
-    <div class="profile-head">
-      <div class="avatar">${cover ? `<img src="${esc(thumbUrl(cover))}" alt="">` : esc(initials(client.name))}</div>
-      <div><h2>${esc(client.name)}</h2>
+    <div class="profile">
+      ${avatar(client, mine[0])}
+      <div style="min-width:0">
+        <h2>${esc(client.name)}</h2>
         <div class="meta">${s.first ? 'Client since ' + fmtDate(s.first.date) : 'No cuts yet'}</div>
         <button class="linkbtn" id="rename">Edit name</button>
-        <form id="renameForm" class="rename" hidden><input class="field" id="renameInput" style="padding:8px 10px"><button class="chip on" type="submit">Save</button></form></div>
+        <form id="renameForm" class="rename" hidden><input class="field" id="renameInput" autocapitalize="words"><button class="chip on" type="submit">Save</button></form>
+      </div>
     </div>
-    <div class="stats">
-      <div class="card metric"><div class="label">Avg price</div><div class="value">${s.count ? money(s.avgPrice) : '—'}</div></div>
-      <div class="card metric"><div class="label">Avg time</div><div class="value">${s.avgMinutes ? Math.round(s.avgMinutes) + ' min' : '—'}</div></div>
-      <div class="card metric"><div class="label">Total cuts</div><div class="value">${s.count}</div></div>
-      <div class="card metric"><div class="label">Total spent</div><div class="value">${money(s.total)}</div></div>
-    </div>
-    <button class="btn-primary" style="margin-top:16px;box-shadow:none" id="logFor">✂️ Log cut for ${esc(client.name.split(' ')[0])}</button>
 
-    <div class="section-title">Previous cuts</div>
+    <section class="card statgrid">
+      <div><div class="eyebrow">Avg price</div><div class="num figure">${s.count ? money(s.avgPrice) : '—'}</div></div>
+      <div><div class="eyebrow">Avg time</div><div class="num figure">${s.avgMinutes ? Math.round(s.avgMinutes) + '<small style="font-size:18px"> min</small>' : '—'}</div></div>
+      <div><div class="eyebrow">Cuts</div><div class="num figure">${s.count}</div></div>
+      <div><div class="eyebrow">Total spent</div><div class="num figure">${money(s.total)}</div></div>
+    </section>
+    ${s.every ? `<div class="rhythm">${s.due ? '<span class="pill due">Due</span>' : ''}<span>Comes in about every <b>${everyText(s.every)}</b>. Last cut ${ago(s.last.date)}.</span></div>` : ''}
+
+    <button class="btn btn-red" id="logFor">${icon('scissors')}Log a cut for ${esc(first)}</button>
+
+    <div class="section"><h3>Cuts</h3><span class="muted" style="font-size:13px">${mine.length ? plural(mine.length, 'photo') : ''}</span></div>
     ${mine.length ? `<div class="gallery">${mine.map(p => `<button data-photo="${p.id}"><img src="${esc(thumbUrl(p))}" alt="" loading="lazy"><span class="date">${cutById[p.cutId] ? fmtShort(cutById[p.cutId].date) : ''}</span></button>`).join('')}</div>`
-      : `<div class="card empty" style="padding:24px">No photos yet</div>`}
+      : `<div class="group empty">No photos yet. Add one next time you log a cut.</div>`}
 
-    <div class="section-title">Transaction history</div>
-    ${history.length ? `<div class="card" style="padding:0">${history.map(c => `
-      <div class="txn">
-        <div class="main"><div>${fmtDate(c.date)}</div>
-          <div class="meta">${[c.style, c.minutes ? c.minutes + ' min' : '', c.notes].filter(Boolean).map(esc).join(' · ') || 'Haircut'}</div></div>
-        <div class="right" style="font-weight:650">${money(c.price || 0)}</div>
-        <button class="del" data-del="${c.id}" aria-label="Delete">✕</button>
-      </div>`).join('')}</div>` : `<div class="card empty" style="padding:24px">No transactions yet</div>`}
+    <div class="section"><h3>History</h3><span class="muted" style="font-size:13px">${history.length ? money(s.total) + ' total' : ''}</span></div>
+    ${history.length ? `<div class="group ledger">${history.map(c => {
+      const d = new Date(c.date);
+      return `<div class="row">
+        <div class="when"><div class="d">${d.getDate()}</div><div class="m">${d.toLocaleDateString('en-US', { month: 'short' })}${d.getFullYear() !== new Date().getFullYear() ? ' ’' + String(d.getFullYear()).slice(2) : ''}</div></div>
+        <div class="main">
+          <div class="name">${esc(c.style) || 'Haircut'}</div>
+          <div class="meta">${[c.minutes ? c.minutes + ' min' : '', c.notes].filter(Boolean).map(esc).join(' · ') || DAYS[d.getDay()]}</div>
+        </div>
+        <div class="right"><div class="num">${money(c.price || 0)}</div><button class="del" data-del="${c.id}">Delete</button></div>
+      </div>`;
+    }).join('')}</div>` : `<div class="group empty">No cuts logged yet.</div>`}
+
+    <div class="danger">
+      <button class="btn btn-danger" id="removeClient">Remove ${esc(first)} from portfolio</button>
+      <div class="note" id="removeNote" hidden>This deletes ${esc(first)}, ${plural(s.count, 'cut')}, and ${plural(mine.length, 'photo')} for good. Tap again to confirm.</div>
+    </div>
   `;
   wireBack();
   document.getElementById('logFor').onclick = () => go('#log-' + id);
@@ -396,17 +486,39 @@ function renderClient(id) {
 
   // Two taps to delete, so a stray tap can't wipe a cut
   $app.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
-    if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Delete?'; b.style.color = 'var(--bad)'; return; }
+    if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Tap to confirm'; b.classList.add('armed'); return; }
     const cutId = b.dataset.del;
     b.disabled = true;
     const ph = data.photos.filter(p => p.cutId === cutId);
     const { error } = await sb.from('cuts').delete().eq('id', cutId); // photo rows go with it
     if (error) { b.disabled = false; return toast('Couldn’t delete: ' + error.message, true); }
-    if (ph.length) await sb.storage.from(BUCKET).remove(ph.flatMap(p => [p.path, p.thumbPath]));
+    await removeFiles(ph);
     data.cuts = data.cuts.filter(c => c.id !== cutId);
     data.photos = data.photos.filter(p => p.cutId !== cutId);
     renderClient(id);
   });
+
+  const rm = document.getElementById('removeClient');
+  rm.onclick = async () => {
+    if (!rm.dataset.armed) {
+      rm.dataset.armed = '1'; rm.classList.add('armed'); rm.textContent = `Yes, remove ${first}`;
+      document.getElementById('removeNote').hidden = false;
+      return;
+    }
+    rm.disabled = true; rm.textContent = 'Removing…';
+    const { error } = await sb.from('clients').delete().eq('id', id); // cuts and photo rows go with it
+    if (error) { rm.disabled = false; rm.textContent = `Yes, remove ${first}`; return toast('Couldn’t remove: ' + error.message, true); }
+    await removeFiles(mine);
+    data.clients = data.clients.filter(c => c.id !== id);
+    data.cuts = data.cuts.filter(c => c.clientId !== id);
+    data.photos = data.photos.filter(p => p.clientId !== id);
+    toast(`Removed ${client.name}`);
+    go('#clients');
+  };
+}
+async function removeFiles(photos) {
+  const paths = photos.flatMap(p => [p.path, p.thumbPath]);
+  for (let i = 0; i < paths.length; i += 100) await sb.storage.from(BUCKET).remove(paths.slice(i, i + 100));
 }
 
 // ---------- Log cut ----------
@@ -415,6 +527,7 @@ const TIME_CHIPS = [20, 30, 45, 60];
 function renderLog(presetId) {
   const { clients } = data;
   const cutsBy = cutsByClient();
+  const photoBy = latestPhotoByClient();
 
   const state = {
     mode: clients.length ? 'returning' : 'new',
@@ -438,44 +551,52 @@ function renderLog(presetId) {
   }
 
   $app.innerHTML = `
-    ${topbar('Log cut', presetId ? '#client-' + presetId : '#home')}
+    ${topbar('Log a cut', presetId ? '#client-' + presetId : '#home')}
     <div class="seg" id="seg">
-      <button data-mode="returning">Returning client</button>
+      <button data-mode="returning">Returning</button>
       <button data-mode="new">New client</button>
     </div>
-    <div class="ac">
-      <label class="label" for="name">Client name</label>
+    <div class="block">
+      <label class="label" for="name">Client</label>
       <input class="field" id="name" placeholder="Start typing a name…" autocomplete="off" autocorrect="off" autocapitalize="words" enterkeyhint="done">
       <div id="suggest"></div>
-      <div id="status"></div>
+      <div class="status" id="status"></div>
     </div>
 
-    <label class="label">Photos</label>
-    <div class="photo-btns">
-      <button class="photo-btn" id="takePhoto"><span class="ico">📷</span>Take photo</button>
-      <button class="photo-btn" id="uploadPhoto"><span class="ico">🖼️</span>Upload from library</button>
+    <div class="block">
+      <span class="label">Photos</span>
+      <div class="photo-btns">
+        <button class="photo-btn primary" id="takePhoto">${icon('camera')}Take photo</button>
+        <button class="photo-btn" id="uploadPhoto">${icon('image')}From library</button>
+      </div>
+      <div class="thumbs" id="thumbs"></div>
     </div>
-    <div class="thumbs" id="thumbs"></div>
 
-    <label class="label" for="price">Price</label>
-    <div class="money"><input class="field" id="price" inputmode="decimal" placeholder="0" enterkeyhint="done"></div>
-    <div class="chips" id="priceChips">${PRICE_CHIPS.map(p => `<button class="chip" data-v="${p}">$${p}</button>`).join('')}</div>
+    <div class="block">
+      <label class="label" for="price">Price</label>
+      <div class="money"><span>$</span><input class="field" id="price" inputmode="decimal" placeholder="0" enterkeyhint="done"></div>
+      <div class="chips" id="priceChips">${PRICE_CHIPS.map(p => `<button class="chip" data-v="${p}">$${p}</button>`).join('')}</div>
+    </div>
 
-    <label class="label">Time</label>
-    <div class="chips" id="timeChips">${TIME_CHIPS.map(m => `<button class="chip" data-v="${m}">${m} min</button>`).join('')}
-      <input class="field" id="minutes" inputmode="numeric" placeholder="Other" style="width:96px;padding:9px 12px;border-radius:999px;font-size:15px"></div>
+    <div class="block">
+      <span class="label">Time in the chair</span>
+      <div class="chips" id="timeChips">${TIME_CHIPS.map(m => `<button class="chip" data-v="${m}">${m} min</button>`).join('')}
+        <input class="field chip-input" id="minutes" inputmode="numeric" placeholder="Other" aria-label="Other minutes"></div>
+    </div>
 
     <details class="more" id="more">
-      <summary>+ Style, notes, date</summary>
-      <label class="label" for="style">Style</label>
-      <input class="field" id="style" placeholder="e.g. Low fade, #2 on sides" autocapitalize="sentences">
-      <label class="label" for="notes">Notes</label>
-      <textarea class="field" id="notes" placeholder="Anything to remember next time"></textarea>
-      <label class="label" for="date">Date &amp; time</label>
-      <input class="field" id="date" type="datetime-local">
+      <summary>${icon('plus')}Style, notes, date</summary>
+      <div class="more-body">
+        <label class="label" for="style">Style</label>
+        <input class="field" id="style" placeholder="e.g. Low fade, #2 on the sides" autocapitalize="sentences">
+        <label class="label" for="notes">Notes</label>
+        <textarea class="field" id="notes" placeholder="Anything to remember next time"></textarea>
+        <label class="label" for="date">Date and time</label>
+        <input class="field" id="date" type="datetime-local">
+      </div>
     </details>
 
-    <div class="savebar"><button class="btn-primary" id="save">Save cut</button></div>
+    <div class="savebar"><button class="btn btn-red" id="save">Save cut</button></div>
   `;
   wireBack();
 
@@ -491,14 +612,15 @@ function renderLog(presetId) {
     if (!state.client && sugEl.childElementCount) { statusEl.innerHTML = ''; return; }
     if (state.client) {
       const s = clientStats(cutsBy[state.client.id] || []);
-      statusEl.innerHTML = `<span class="pill ret">✓ Returning · ${s.count} cut${s.count === 1 ? '' : 's'}${s.last ? ', last ' + fmtShort(s.last.date) : ''}</span>`;
+      statusEl.innerHTML = `<span class="pill ret">${icon('check')}Returning · ${plural(s.count, 'cut')}${s.last ? ', last ' + ago(s.last.date) : ''}</span>`;
     } else if (typed) {
       const dup = clients.find(c => norm(c.name) === norm(typed));
       statusEl.innerHTML = dup
-        ? `<span class="pill ret">“${esc(dup.name)}” already exists. <u>Tap to use</u></span>`
-        : `<span class="pill new">＋ New client will be added</span>`;
+        ? `<button class="pill ret">${esc(dup.name)} is already a client · tap to use</button>`
+        : `<span class="pill new">${icon('plus')}New client</span>`;
       if (dup) statusEl.firstChild.onclick = () => pick(dup);
     } else statusEl.innerHTML = '';
+    statusEl.querySelectorAll('.ico').forEach(i => { i.style.width = '14px'; i.style.height = '14px'; i.style.strokeWidth = '2.6'; });
   }
   function drawSuggest() {
     const q = norm(nameEl.value);
@@ -507,9 +629,9 @@ function renderLog(presetId) {
       .filter(c => norm(c.name).includes(q))
       .sort((a, b) => (norm(b.name).startsWith(q) - norm(a.name).startsWith(q)) || a.name.localeCompare(b.name))
       .slice(0, 5);
-    sugEl.innerHTML = hits.length ? `<div class="suggest">${hits.map(c => {
+    sugEl.innerHTML = hits.length ? `<div class="group suggest">${hits.map(c => {
       const s = clientStats(cutsBy[c.id] || []);
-      return `<button data-id="${c.id}"><b>${esc(c.name)}</b><span class="meta">${s.last ? 'last ' + fmtShort(s.last.date) : ''}</span></button>`;
+      return `<button class="row" data-id="${c.id}">${avatar(c, photoBy[c.id])}<div class="main"><div class="name">${esc(c.name)}</div><div class="meta">${s.last ? 'last cut ' + ago(s.last.date) : 'no cuts yet'}</div></div>${s.last ? `<div class="right"><div class="num" style="font-size:20px">${money(s.last.price)}</div></div>` : ''}</button>`;
     }).join('')}</div>` : '';
     sugEl.querySelectorAll('[data-id]').forEach(b => {
       // pointerdown so the tap lands before the keyboard closes
@@ -553,7 +675,7 @@ function renderLog(presetId) {
   };
   cam.onchange = onFiles; lib.onchange = onFiles;
   function drawThumbs() {
-    $('thumbs').innerHTML = state.files.map((f, i) => `<div class="thumb"><img src="${f.url}" alt=""><button data-i="${i}" aria-label="Remove">✕</button></div>`).join('');
+    $('thumbs').innerHTML = state.files.map((f, i) => `<div class="thumb"><img src="${f.url}" alt=""><button data-i="${i}" aria-label="Remove photo">${icon('x')}</button></div>`).join('');
     $('thumbs').querySelectorAll('[data-i]').forEach(b => b.onclick = () => { state.files.splice(+b.dataset.i, 1); drawThumbs(); });
   }
 
@@ -657,14 +779,14 @@ function toLocalInput(d) {
 function renderSchedule() {
   $app.innerHTML = `
     ${topbar('Schedule')}
-    <div class="placeholder"><div class="ico">📅</div><h2>Coming soon</h2><p>Your schedule will live here.</p></div>
+    <div class="placeholder">${icon('calendar')}<h2>Coming soon</h2><p>Bookings and your week at a glance will live here.</p></div>
   `;
   wireBack();
 }
 
 // ---------- Boot ----------
 if (!sb) {
-  $app.innerHTML = `<div class="loading"><div style="text-align:center">CutFolio isn’t connected to its database yet.<br>Add the Supabase URL, anon key, and login email to <b>config.js</b>.</div></div>`;
+  $app.innerHTML = `<div class="loading"><div>CutFolio isn’t connected to its database yet.<br>Add the Supabase URL, anon key, and login email to <b>config.js</b>.</div></div>`;
 } else {
   sb.auth.onAuthStateChange((_event, session) => { setTimeout(() => start(session), 0); });
 }
