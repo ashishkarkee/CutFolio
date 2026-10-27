@@ -10,6 +10,7 @@
   --ink: #eee9dc;
   --muted: #a5a39b;
   --accent: #d9b26a;        /* brass */
+  --gold: linear-gradient(90deg, #a8803c, #d9b26a 35%, #f0d79a 55%, #d9b26a 75%, #a8803c);
   --accent-soft: #33301f;
   --on-accent: #10200f;
   --alt: #8fcfaa;           /* sage, for returning clients */
@@ -52,7 +53,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 /* Brass rule under the wordmark */
 .pole {
   height: 4px; border-radius: 2px;
-  background: linear-gradient(90deg, #a8803c, var(--accent) 35%, #f0d79a 55%, var(--accent) 75%, #a8803c);
+  background: var(--gold);
 }
 
 /* ---------- Headers ---------- */
@@ -75,7 +76,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
   min-height: 52px; padding: 0 16px; border-radius: 12px; font-weight: 600; font-size: 16px;
   background: var(--surface); border: 1px solid var(--line);
 }
-.btn-red { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.btn-red { background: var(--gold); color: var(--on-accent); border-color: #c49a52; }
 .btn-big { grid-column: span 2; min-height: 64px; font-size: 19px; }
 .btn-big .ico { width: 26px; height: 26px; }
 .btn-tile { flex-direction: column; gap: 6px; min-height: 76px; padding: 10px 8px; font-size: 15px; text-align: center; }
