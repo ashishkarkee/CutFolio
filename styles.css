@@ -17,9 +17,6 @@
   --danger: #ec7b6c;
   --danger-soft: #3a2420;
   --good: #8fcfaa;
-  --pole-red: #c8423a;
-  --pole-blue: #4a6cc0;
-  --pole-white: #eee9dc;
   --scrim: rgba(6, 14, 11, .95);
 
   --font-display: "Big Shoulders Display", "Arial Narrow", "Helvetica Neue", sans-serif;
@@ -52,11 +49,10 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
 .muted { color: var(--muted); }
 
-/* Barber pole band */
+/* Brass rule under the wordmark */
 .pole {
-  height: 6px; border-radius: 3px;
-  background: repeating-linear-gradient(-45deg, var(--pole-red) 0 7px, var(--pole-white) 7px 12px, var(--pole-blue) 12px 19px, var(--pole-white) 19px 24px);
-  box-shadow: inset 0 0 0 1px var(--line);
+  height: 4px; border-radius: 2px;
+  background: linear-gradient(90deg, #a8803c, var(--accent) 35%, #f0d79a 55%, var(--accent) 75%, #a8803c);
 }
 
 /* ---------- Headers ---------- */

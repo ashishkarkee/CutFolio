@@ -761,7 +761,7 @@ function renderLog(presetId) {
       data.cuts.push(cut);
       data.photos.push(...photos);
       toast(`Saved ${money(price)} cut for ${client.name.split(' ')[0]}`);
-      go('#client-' + client.id);
+      go('#home');
     } catch (err) {
       btn.disabled = false; btn.textContent = 'Save cut';
       toast('Couldn’t save: ' + (err.message || err) + '. Check your connection and try again.', true);
