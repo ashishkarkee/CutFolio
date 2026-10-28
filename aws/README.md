@@ -2,9 +2,11 @@
 
 Clients who have an email on their profile get:
 
-- **A booking confirmation** as soon as they're booked (or moved): "You're booked: Sat, Nov 1 at 2 PM".
-- **A 24-hour reminder**: "You're confirmed for a haircut tomorrow at 2 PM!"
-- **An overdue reminder** when the barber picks them on the Overdue screen: "Your last cut was on September 28… Here's when I have openings: Saturday 12–4 PM, Sunday 4–8 PM."
+- **A booking confirmation** ("Haircut confirmed") as soon as they're booked (or moved).
+- **A 24-hour reminder** ("Haircut reminder"): "You're confirmed for a haircut tomorrow at 2 PM!"
+- **An overdue reminder** ("Haircut reminder") when the barber picks them on the Overdue screen: "Your last cut was on September 28… Here's when I have openings: Saturday 12–4 PM, Sunday 4–8 PM."
+
+Emails come from Lucas, are signed "Lucas", and point clients to Instagram for changes.
 
 Every email has an unsubscribe link, and every email sent is logged in Supabase so the app can show it on the client's profile and on the booking.
 
@@ -94,7 +96,9 @@ Answer the prompts:
 | SupabaseSecretKey | the `sb_secret_…` key (it won't show as you paste) |
 | FromEmail | the address you verified in step 2, e.g. `bookings@freshfades.com` |
 | ReplyToEmail | the barber's real inbox, where client replies should go |
-| ShopName / BarberName / ShopAddress | how emails are signed; the address is optional |
+| BarberName | press Enter for `Lucas` (signs the emails and shows as the sender) |
+| InstagramHandle | Lucas's Instagram handle, e.g. `lucascuts` (optional; emails say "Feel free to message me on Instagram") |
+| ShopAddress | optional, shown in confirmations and reminders |
 | ShopTimeZone | e.g. `America/Chicago`, `America/New_York`, `America/Los_Angeles` |
 | AppOrigin | press Enter for `https://ashishkarkee.github.io` |
 | Confirm changes before deploy | `N` |

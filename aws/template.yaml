@@ -20,13 +20,14 @@ Parameters:
     Type: String
     Default: ''
     Description: Where client replies go (the barber's own email). Leave blank to use FromEmail.
-  ShopName:
-    Type: String
-    Default: CutFolio
   BarberName:
     Type: String
+    Default: Lucas
+    Description: Signs the emails and shows as the sender name
+  InstagramHandle:
+    Type: String
     Default: ''
-    Description: Signs the emails, e.g. Marcus
+    Description: Optional. Emails say "Feel free to message me on Instagram (@handle)"
   ShopAddress:
     Type: String
     Default: ''
@@ -57,8 +58,8 @@ Resources:
           SUPABASE_SECRET_KEY: !Ref SupabaseSecretKey
           FROM_EMAIL: !Ref FromEmail
           REPLY_TO_EMAIL: !Ref ReplyToEmail
-          SHOP_NAME: !Ref ShopName
           BARBER_NAME: !Ref BarberName
+          INSTAGRAM_HANDLE: !Ref InstagramHandle
           SHOP_ADDRESS: !Ref ShopAddress
           SHOP_TIME_ZONE: !Ref ShopTimeZone
       FunctionUrlConfig:

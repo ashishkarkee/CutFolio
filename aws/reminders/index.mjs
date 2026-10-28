@@ -20,8 +20,9 @@ const SUPABASE_URL = (env.SUPABASE_URL || '').replace(/\/$/, '');
 const SUPABASE_KEY = env.SUPABASE_SECRET_KEY || '';
 const FROM = env.FROM_EMAIL;
 const REPLY_TO = env.REPLY_TO_EMAIL || '';
-const SHOP = env.SHOP_NAME || 'CutFolio';
-const BARBER = env.BARBER_NAME || '';
+const BARBER = env.BARBER_NAME || 'Lucas';
+const INSTAGRAM = (env.INSTAGRAM_HANDLE || '').replace(/^@/, '');
+const DM = `Feel free to message me on Instagram${INSTAGRAM ? ` (@${INSTAGRAM})` : ''}`;
 const ADDRESS = env.SHOP_ADDRESS || '';
 const ZONE = env.SHOP_TIME_ZONE || 'America/New_York';
 
@@ -69,12 +70,12 @@ async function sendDueReminders(context) {
     const when = describe(a.starts_at, now);
     const outcome = await sendAndLog({
       owner: a.owner, clientId: a.client_id, appointmentId: a.id, kind: 'reminder', startsAt: a.starts_at, to: c.email,
-      subject: `See you ${when.relative} at ${when.time}`,
+      subject: 'Haircut reminder',
       lines: [
         `Hi ${firstName(c.name)},`,
         `You’re confirmed for a haircut ${when.relative} at ${when.time}!`,
         `That’s ${when.date}${ADDRESS ? ` at ${ADDRESS}` : ''}.`,
-        `If you can’t make it, just reply to this email.`,
+        `${DM} if you need to change anything.`,
       ],
     }, context);
     results[outcome]++;
@@ -96,12 +97,12 @@ async function confirm(owner, appointmentId, context) {
   const moved = before.length > 0;
   const email = {
     owner, clientId: a.client_id, appointmentId: a.id, kind: 'confirmation', startsAt: a.starts_at, to: c.email,
-    subject: moved ? `Your haircut moved to ${when.short}` : `You’re booked: ${when.short}`,
+    subject: moved ? 'Haircut moved' : 'Haircut confirmed',
     lines: [
       `Hi ${firstName(c.name)},`,
       moved ? `Your haircut has moved. The new time is ${when.long}.` : `You’re booked for a haircut on ${when.long}.`,
       ADDRESS ? `Where: ${ADDRESS}` : '',
-      `I’ll send a reminder the day before. If you need to change anything, just reply to this email.`,
+      `I’ll send a reminder the day before. ${DM} if you need to change anything.`,
     ],
   };
   const outcome = await sendAndLog(email, context);
@@ -126,14 +127,14 @@ async function nudge(owner, { clientIds, openings, note }, context) {
     const last = lastCut[c.id] ? dateLabel(lastCut[c.id]) : '';
     const email = {
       owner, clientId: c.id, kind: 'nudge', to: c.email,
-      subject: `Time for a fresh cut, ${firstName(c.name)}?`,
+      subject: 'Haircut reminder',
       lines: [
         `Hi ${firstName(c.name)},`,
         last ? `Your last cut was on ${last}, so you’re probably about due.` : `It’s been a while, so you’re probably about due.`,
         `Here’s when I have openings:`,
         { list: slots },
         extra,
-        `Reply to this email with the time that works and I’ll book you in.`,
+        `${DM} with the time that works and I’ll book you in.`,
       ],
     };
     const outcome = await sendAndLog(email, context);
@@ -147,13 +148,13 @@ async function unsubscribe(event) {
   const page = (title, text) => ({
     statusCode: 200,
     headers: { 'content-type': 'text/html; charset=utf-8' },
-    body: `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(SHOP)}</title>` +
+    body: `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unsubscribe</title>` +
       `<body style="font:17px/1.5 -apple-system,sans-serif;max-width:420px;margin:15vh auto;padding:0 20px;text-align:center">` +
       `<h1 style="font-size:24px">${esc(title)}</h1><p>${esc(text)}</p></body>`,
   });
   if (!isUuid(q.c) || !q.t || !safeEqual(q.t, unsubToken(q.c))) return page('Link not recognized', 'This unsubscribe link is incomplete. Reply to any email and we’ll take you off the list.');
   await db('PATCH', `clients?id=eq.${q.c}`, { reminders: false });
-  return page('You’re unsubscribed', `You won’t get any more emails from ${SHOP}.`);
+  return page('You’re unsubscribed', `You won’t get any more emails from ${BARBER}.`);
 }
 
 // ---------- Email ----------
@@ -187,18 +188,17 @@ async function sendAndLog(e, context) {
 
 async function send(to, subject, lines, unsub) {
   const parts = lines.filter(Boolean);
-  const sign = BARBER ? `${BARBER}, ${SHOP}` : SHOP;
+  const sign = BARBER;
   const text = parts.map(p => p.list ? p.list.map(s => `  • ${s}`).join('\n') : p).join('\n\n') +
     `\n\n${sign}\n\nDon’t want these emails? ${unsub}`;
   const html = `<div style="font:16px/1.55 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1a1a1a;max-width:520px">` +
-    `<div style="height:4px;background:linear-gradient(90deg,#a8803c,#f0d79a,#a8803c);border-radius:2px;margin-bottom:20px"></div>` +
     parts.map(p => p.list
       ? `<ul style="padding-left:20px;margin:0 0 14px">${p.list.map(s => `<li style="margin:4px 0"><b>${esc(s)}</b></li>`).join('')}</ul>`
       : `<p style="margin:0 0 14px">${esc(p)}</p>`).join('') +
     `<p style="margin:22px 0 0">${esc(sign)}</p>` +
     `<p style="margin:28px 0 0;font-size:12px;color:#888">Don’t want these emails? <a href="${esc(unsub)}" style="color:#888">Unsubscribe</a></p></div>`;
   const cmd = () => ses.send(new SendEmailCommand({
-    FromEmailAddress: `${SHOP.replace(/[<>"]/g, '')} <${FROM}>`,
+    FromEmailAddress: `${BARBER.replace(/[<>",]/g, '')} <${FROM}>`,
     Destination: { ToAddresses: [to] },
     ReplyToAddresses: REPLY_TO ? [REPLY_TO] : undefined,
     Content: {

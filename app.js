@@ -1379,11 +1379,11 @@ function renderOverdue() {
 
     ${sample ? `<section class="card preview">
       <div class="eyebrow">Email preview</div>
-      <div class="subj">Time for a fresh cut, ${esc(sample.cl.name.split(' ')[0])}?</div>
+      <div class="subj">Haircut reminder</div>
       <p>Hi ${esc(sample.cl.name.split(' ')[0])}, your last cut was on ${new Date(sample.s.last.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}, so you’re probably about due. Here’s when I have openings:</p>
       ${nudge.openings.length ? `<ul>${nudge.openings.map(o => `<li>${esc(slotLabel(o))}</li>`).join('')}</ul>` : `<p class="muted">Tap a day above to add your openings.</p>`}
       ${nudge.note.trim() ? `<p>${esc(nudge.note.trim())}</p>` : ''}
-      <p>Reply to this email with the time that works and I’ll book you in.</p>
+      <p>Feel free to message me on Instagram with the time that works and I’ll book you in.</p>
     </section>` : ''}
     ${live ? '' : `<p class="hint">Sending turns on once AWS email is connected (see aws/README.md).</p>`}
     <div class="savebar"><button class="btn btn-red" id="nSend" ${live && picked.length && nudge.openings.length ? '' : 'disabled'}>${icon('mail')}${picked.length ? `Email ${plural(picked.length, 'client')}` : 'Pick clients to email'}</button></div>
