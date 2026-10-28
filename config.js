@@ -7,4 +7,7 @@ window.CUTFOLIO_CONFIG = {
   // The Supabase user the app signs in as. The barber only types the password,
   // and stays signed in on his phone until he taps Sign out.
   loginEmail: 'barber@cutfolio.app',
+  // Email reminders: the RemindersUrl that `sam deploy` prints (see aws/README.md).
+  // Leave blank and the app works the same, it just doesn't send emails.
+  remindersUrl: '',
 };

@@ -1,2 +1,4 @@
 node_modules/
 .DS_Store
+aws/samconfig.toml
+aws/.aws-sam/

@@ -1,0 +1,97 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  CutFolio email reminders. One Lambda that sends booking confirmations,
+  24-hour reminders (run every 15 minutes by EventBridge Scheduler), and
+  come-back emails to overdue clients, all through Amazon SES.
+
+Parameters:
+  SupabaseUrl:
+    Type: String
+    Description: Supabase Project URL, e.g. https://abcd.supabase.co
+  SupabaseSecretKey:
+    Type: String
+    NoEcho: true
+    Description: Supabase secret key (sb_secret_...) from Project Settings > API Keys. Stays in Lambda, never in the app.
+  FromEmail:
+    Type: String
+    Description: The SES-verified address emails are sent from
+  ReplyToEmail:
+    Type: String
+    Default: ''
+    Description: Where client replies go (the barber's own email). Leave blank to use FromEmail.
+  ShopName:
+    Type: String
+    Default: CutFolio
+  BarberName:
+    Type: String
+    Default: ''
+    Description: Signs the emails, e.g. Marcus
+  ShopAddress:
+    Type: String
+    Default: ''
+    Description: Optional, shown in confirmation and reminder emails
+  ShopTimeZone:
+    Type: String
+    Default: America/New_York
+    Description: IANA time zone the shop is in, e.g. America/Chicago or America/Los_Angeles
+  AppOrigin:
+    Type: String
+    Default: https://ashishkarkee.github.io
+    Description: The site allowed to call the function (no path, no trailing slash)
+
+Resources:
+  RemindersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-reminders'
+      CodeUri: reminders/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 256
+      Timeout: 60
+      Environment:
+        Variables:
+          SUPABASE_URL: !Ref SupabaseUrl
+          SUPABASE_SECRET_KEY: !Ref SupabaseSecretKey
+          FROM_EMAIL: !Ref FromEmail
+          REPLY_TO_EMAIL: !Ref ReplyToEmail
+          SHOP_NAME: !Ref ShopName
+          BARBER_NAME: !Ref BarberName
+          SHOP_ADDRESS: !Ref ShopAddress
+          SHOP_TIME_ZONE: !Ref ShopTimeZone
+      FunctionUrlConfig:
+        AuthType: NONE # the app sends the barber's Supabase token, which the function checks
+        Cors:
+          AllowOrigins: [!Ref AppOrigin, 'http://localhost:8000']
+          AllowMethods: [POST]
+          AllowHeaders: [authorization, content-type]
+          MaxAge: 3600
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ses:SendEmail
+              Resource: '*'
+            - Effect: Allow
+              Action: lambda:GetFunctionUrlConfig
+              Resource: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-reminders'
+      Events:
+        Every15Minutes:
+          Type: ScheduleV2 # EventBridge Scheduler
+          Properties:
+            ScheduleExpression: rate(15 minutes)
+            Input: '{"job":"reminders"}'
+            RetryPolicy:
+              MaximumRetryAttempts: 0 # the next run 15 minutes later picks up anything missed
+
+  RemindersLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-reminders'
+      RetentionInDays: 14
+
+Outputs:
+  RemindersUrl:
+    Description: Paste this into config.js as remindersUrl
+    Value: !GetAtt RemindersFunctionUrl.FunctionUrl
