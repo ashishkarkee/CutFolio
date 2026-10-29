@@ -445,20 +445,20 @@ function renderHome() {
 
 // ---------- Client portfolio ----------
 function renderClients() {
+  const overdueCount = overdueClients().length;
   const cutsBy = cutsByClient();
   const photoBy = latestPhotoByClient();
   const rows = data.clients.map(cl => ({ cl, s: clientStats(cutsBy[cl.id] || []) }))
     .sort((a, b) => (b.s.last?.date || b.cl.createdAt).localeCompare(a.s.last?.date || a.cl.createdAt));
 
   $app.innerHTML = `
-    ${topbar('Clients')}
-    ${overdueBanner(overdueClients().length)}
+    <div class="topbar"><button class="icon-btn" data-back="#home" aria-label="Back">${icon('left')}</button><h1>Clients</h1><button class="chip overdue-chip" data-go="#overdue">${icon('mail')}Overdue${overdueCount ? `<span class="pill due">${overdueCount}</span>` : ''}</button></div>
     <label class="search">${icon('search')}<input id="q" type="search" placeholder="Search by name or style" autocomplete="off" autocorrect="off"></label>
     <div class="count-line" id="count"></div>
     <div id="list"></div>
   `;
   wireBack();
-  $app.querySelectorAll('.banner').forEach(b => b.onclick = () => go(b.dataset.go));
+  $app.querySelectorAll('.overdue-chip').forEach(b => b.onclick = () => { nudge.back = '#clients'; go(b.dataset.go); });
   const list = document.getElementById('list'), count = document.getElementById('count');
   const draw = (q) => {
     const nq = norm(q);
@@ -1403,8 +1403,8 @@ function renderOverdue() {
   `;
   wireBack();
   $app.querySelector('[data-back]').onclick = () => {
-    const back = nudge.extra ? '#client-' + nudge.extra : '#home';
-    nudge.picked = null; nudge.extra = null;
+    const back = nudge.extra ? '#client-' + nudge.extra : nudge.back || '#home';
+    nudge.picked = null; nudge.extra = null; nudge.back = null;
     go(back);
   };
   $app.querySelectorAll('.overdue [data-id]').forEach(b => b.onclick = () => {
