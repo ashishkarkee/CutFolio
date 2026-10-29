@@ -1,17 +1,3 @@
-// CutFolio email reminders: one Lambda, three jobs.
-//
-// 1. EventBridge Scheduler runs it every 15 minutes ({"job":"reminders"}) and it
-//    emails a 24-hour reminder for every booking that starts in the next day.
-// 2. The app calls its Function URL right after a booking is made or moved
-//    (action "confirm") and when the barber messages overdue clients ("nudge").
-//    Those calls carry the barber's Supabase login token, which is checked
-//    before anything is read or sent.
-// 3. Clients open /unsubscribe from the link at the bottom of every email.
-//
-// Emails go out through Gmail (free) or Amazon SES (needs a domain).
-// Every email sent is logged in the Supabase "emails" table, which is how the
-// app shows what was sent on each profile.
-
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { LambdaClient, GetFunctionUrlConfigCommand } from '@aws-sdk/client-lambda';
@@ -30,9 +16,6 @@ const AUTOMATED = `This is an automated message, so replies to this email aren�
 const ADDRESS = env.SHOP_ADDRESS || '';
 const ZONE = env.SHOP_TIME_ZONE || 'America/New_York';
 
-// With a Gmail app password, emails go out through that Gmail account (free,
-// and they pass Gmail's sender checks). Without one, they go through SES,
-// which needs a domain of your own to stay out of spam.
 const GMAIL_PASSWORD = (env.GMAIL_APP_PASSWORD || '').replace(/\s+/g, '');
 const gmail = GMAIL_PASSWORD
   ? nodemailer.createTransport({ service: 'gmail', auth: { user: FROM, pass: GMAIL_PASSWORD } })
@@ -61,10 +44,6 @@ export const handler = async (event, context) => {
   }
 };
 
-// ---------- Jobs ----------
-
-// Bookings starting within 24 hours get one reminder each. A booking confirmed
-// less than a day before it starts doesn't need one, so it's skipped.
 async function sendDueReminders(context) {
   const now = new Date();
   const until = new Date(now.getTime() + 24 * 3600e3);
@@ -95,7 +74,6 @@ async function sendDueReminders(context) {
   return results;
 }
 
-// Sent by the app right after a booking is made or moved.
 async function confirm(owner, appointmentId, context) {
   if (!isUuid(appointmentId)) throw new Error('Missing booking');
   const [a] = await db('GET', `appointments?select=id,client_id,starts_at,minutes,clients(name,email,reminders)&id=eq.${appointmentId}&owner=eq.${owner}`);
@@ -120,7 +98,6 @@ async function confirm(owner, appointmentId, context) {
   return { sent: outcome === 'sent', email: email.row };
 }
 
-// "It's been a while" emails to overdue clients, with the barber's openings.
 async function nudge(owner, { clientIds, openings, note }, context) {
   if (!Array.isArray(clientIds) || !clientIds.length || clientIds.length > 50 || !clientIds.every(isUuid)) throw new Error('Pick up to 50 clients');
   if (!Array.isArray(openings) || !openings.length || openings.length > 10) throw new Error('Add at least one opening');
@@ -168,10 +145,6 @@ async function unsubscribe(event) {
   return page('You’re unsubscribed', `You won’t get any more emails from ${BARBER}.`);
 }
 
-// ---------- Email ----------
-
-// Claim a log row, send, then record the SES message id. If the send fails
-// the row is removed, so the app never shows an email that didn't go out.
 async function sendAndLog(e, context) {
   let row;
   try {
@@ -180,7 +153,7 @@ async function sendAndLog(e, context) {
       kind: e.kind, starts_at: e.startsAt || null, to_email: e.to,
     });
   } catch (err) {
-    if (err.code === '23505') return 'skipped'; // another run already sent this reminder
+    if (err.code === '23505') return 'skipped';
     throw err;
   }
   try {
@@ -211,9 +184,7 @@ async function send(to, subject, lines, unsub, kind) {
     `<p style="margin:28px 0 0;font-size:12px;color:#888">${esc(AUTOMATED)}<br>Don’t want these emails? <a href="${esc(unsub)}" style="color:#888">Unsubscribe</a></p></div>`;
   const unsubHeaders = { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' };
   if (gmail) {
-    // From a personal Gmail account, a plain-text note with no bulk-mail
-    // headers looks like a normal email to junk filters (iCloud especially).
-    // Only overdue reminders, which are promotional, carry the unsubscribe link.
+    // Plain text with no bulk-mail headers stays out of junk folders.
     const info = await gmail.sendMail({
       from: { name: BARBER.replace(/[<>",]/g, ''), address: FROM },
       to, replyTo: REPLY_TO || undefined, subject,
@@ -236,14 +207,11 @@ async function send(to, subject, lines, unsub, kind) {
   try {
     return await cmd();
   } catch (err) {
-    // The SES sandbox allows one email a second; wait and try once more
     if (err.name !== 'TooManyRequestsException' && err.name !== 'ThrottlingException') throw err;
     await new Promise(r => setTimeout(r, 1100));
     return cmd();
   }
 }
-
-// ---------- Unsubscribe links ----------
 
 const unsubToken = clientId => createHmac('sha256', SUPABASE_KEY).update('unsubscribe:' + clientId).digest('base64url').slice(0, 22);
 const safeEqual = (a, b) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -256,10 +224,7 @@ async function unsubLink(clientId, context) {
   return `${baseUrl.replace(/\/$/, '')}/unsubscribe?c=${clientId}&t=${unsubToken(clientId)}`;
 }
 
-// ---------- Supabase ----------
-
-// The secret key bypasses row-level security, so every query that runs for
-// the app also filters on the signed-in barber's id.
+// The secret key bypasses RLS, so every query must filter on the barber's id.
 async function db(method, path, body) {
   const headers = { apikey: SUPABASE_KEY, 'content-type': 'application/json', prefer: 'return=representation' };
   // Older JWT-style service_role keys also go in Authorization; new sb_secret_ keys must not
@@ -275,8 +240,6 @@ async function db(method, path, body) {
   return json;
 }
 
-// Asks Supabase who the token belongs to. On failure, says why, so a bad
-// secret key in the deploy isn't mistaken for an expired login.
 async function signedInUser(authorization) {
   const token = (authorization || '').replace(/^Bearer\s+/i, '');
   if (!token) return { problem: 'Sign in again (no login token sent)' };
@@ -290,8 +253,6 @@ async function signedInUser(authorization) {
   return { problem: `Sign in again (Supabase said ${res.status}${msg ? ': ' + msg : ''})` };
 }
 
-// ---------- Helpers ----------
-
 const reply = (statusCode, body) => ({ statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 const isUuid = s => typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -300,8 +261,6 @@ const fmt = (d, opts) => new Intl.DateTimeFormat('en-US', { timeZone: ZONE, ...o
 const dayKey = d => fmt(d, { year: 'numeric', month: '2-digit', day: '2-digit' });
 const dateLabel = d => fmt(d, { month: 'long', day: 'numeric' });
 
-// Times are written in the shop's time zone: "2 PM" or "2:30 PM", and
-// "today" / "tomorrow" / "on Saturday" relative to now.
 export function describe(startsAt, now) {
   const time = fmt(startsAt, { hour: 'numeric', minute: '2-digit' }).replace(':00', '');
   const tomorrow = new Date(new Date(now).getTime() + 864e5);
