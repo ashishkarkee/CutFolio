@@ -1,21 +1,15 @@
-// CutFolio: a private app for one barber. Data lives in Supabase (Postgres +
-// a private Storage bucket); the signed-in barber is the only one who can read it.
-
-// ---------- Supabase ----------
 const CONFIG = window.CUTFOLIO_CONFIG || {};
 const sb = CONFIG.supabaseUrl && CONFIG.supabaseAnonKey && CONFIG.loginEmail
   ? window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true } })
   : null;
 const BUCKET = 'photos';
-const URL_TTL = 60 * 60 * 24; // signed photo links last a day; refreshed on each app load
+const URL_TTL = 60 * 60 * 24;
 
-// Everything is loaded once after sign-in and kept in memory; writes go to
-// Supabase first and then update this copy.
 const data = { clients: [], cuts: [], photos: [], appts: [], emails: [] };
-const photoUrls = {}; // storage path -> signed URL
+const photoUrls = {};
 let user = null;
-let scheduleReady = true; // false until the appointments table exists in Supabase
-let emailReady = true;    // false until supabase/reminders.sql has been run
+let scheduleReady = true;
+let emailReady = true;
 
 async function fetchAll(table) {
   const rows = [];
@@ -38,7 +32,6 @@ async function loadData() {
   data.clients = clients.map(toClient);
   data.cuts = cuts.map(toCut);
   data.photos = photos.map(toPhoto);
-  // The schedule is optional: if its table hasn't been added yet, the rest of the app still works
   try {
     data.appts = (await fetchAll('appointments')).map(toAppt);
     scheduleReady = true;
@@ -64,10 +57,8 @@ async function signPaths(paths) {
 const thumbUrl = p => photoUrls[p.thumbPath] || photoUrls[p.path] || '';
 const fullUrl = p => photoUrls[p.path] || photoUrls[p.thumbPath] || '';
 
-// ---------- Email reminders (AWS Lambda + SES, see aws/README.md) ----------
 const emailLive = () => emailReady && !!CONFIG.remindersUrl;
 const canEmail = client => emailLive() && !!client?.email && client.reminders;
-// Calls the reminders Lambda with the barber's login token, which it checks
 async function callReminders(body) {
   const { data: { session } } = await sb.auth.getSession();
   const res = await fetch(CONFIG.remindersUrl, {
@@ -79,7 +70,6 @@ async function callReminders(body) {
   if (!res.ok) throw new Error(out.error || `Email service error ${res.status}`);
   return out;
 }
-// Send a booking confirmation if the client has reminders on. Never blocks the booking.
 async function confirmBooking(appt) {
   const client = data.clients.find(c => c.id === appt.clientId);
   if (!canEmail(client)) return false;
@@ -92,7 +82,6 @@ async function confirmBooking(appt) {
     return false;
   }
 }
-// The confirmation and reminder sent for a booking's current time
 function apptEmails(appt) {
   const t = new Date(appt.start).getTime();
   const mine = data.emails.filter(e => e.apptId === appt.id && e.startsAt && new Date(e.startsAt).getTime() === t);
@@ -101,7 +90,6 @@ function apptEmails(appt) {
 const EMAIL_KINDS = { confirmation: 'Booking confirmation', reminder: '24-hour reminder', nudge: 'Overdue reminder' };
 const fmtWhen = iso => `${new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
 
-// ---------- Helpers ----------
 const $app = document.getElementById('app');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = n => '$' + (Math.round(n * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
@@ -116,7 +104,6 @@ const DAY_MS = 864e5;
 const uuid = () => crypto.randomUUID ? crypto.randomUUID()
   : '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
 
-// "today", "yesterday", "5 days ago", "3 wks ago", "2 mo ago"
 function ago(iso) {
   const startOf = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const days = Math.round((startOf(new Date()) - startOf(new Date(iso))) / DAY_MS);
@@ -128,7 +115,6 @@ function ago(iso) {
   return `${(days / 365).toFixed(1).replace('.0', '')} yr ago`;
 }
 
-// Line icons, drawn on a 24px grid
 const ICONS = {
   scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.6 7.6 20 19M8.6 16.4 20 5"/>',
   calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
@@ -168,7 +154,6 @@ function openViewer(src, caption) {
   document.body.appendChild(el);
 }
 
-// Shrink a photo to a max size, as JPEG, so uploads are quick on cell data.
 async function shrink(file, maxSide, quality) {
   try {
     const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -183,11 +168,9 @@ async function shrink(file, maxSide, quality) {
   }
 }
 
-// Client stats from a list of their cuts
 function clientStats(cuts) {
   const sorted = [...cuts].sort((a, b) => b.date.localeCompare(a.date));
   const timed = cuts.filter(c => c.minutes > 0).map(c => c.minutes);
-  // Average days between visits, once there are at least two
   const gaps = [];
   for (let i = 0; i < sorted.length - 1; i++) gaps.push((new Date(sorted[i].date) - new Date(sorted[i + 1].date)) / DAY_MS);
   const every = gaps.length ? avg(gaps) : 0;
@@ -200,7 +183,6 @@ function clientStats(cuts) {
     last: sorted[0],
     first: sorted[sorted.length - 1],
     every,
-    // Overdue once it's been noticeably longer than his usual gap
     due: every >= 7 && sinceLast > every * 1.25,
   };
 }
@@ -218,7 +200,6 @@ function latestPhotoByClient() {
   }
   return by;
 }
-// Clients past their usual gap with nothing booked, most overdue first
 function overdueClients() {
   const cutsBy = cutsByClient();
   const now = new Date();
@@ -236,7 +217,6 @@ const startOfDay = d => { d = new Date(d); return new Date(d.getFullYear(), d.ge
 const apptEnd = a => new Date(new Date(a.start).getTime() + a.minutes * 60000);
 const everyText = days => days < 10 ? `${Math.round(days)} days` : `${Math.round(days / 7)} weeks`;
 
-// ---------- Router ----------
 const routes = [
   [/^#?(?:home)?$/, renderHome],
   [/^#clients$/, renderClients],
@@ -245,7 +225,7 @@ const routes = [
   [/^#schedule$/, renderSchedule],
   [/^#overdue$/, renderOverdue],
 ];
-let clientBack = '#clients'; // where the back button on a client profile goes
+let clientBack = '#clients';
 let lastHash = '';
 function route() {
   releaseUrls();
@@ -271,7 +251,6 @@ function wireBack() {
   if (b) b.onclick = () => go(b.dataset.back);
 }
 
-// ---------- Sign in ----------
 function renderLogin() {
   $app.innerHTML = `
     <form class="login" id="login">
@@ -286,7 +265,6 @@ function renderLogin() {
     e.preventDefault();
     const btn = document.getElementById('signin');
     btn.disabled = true; btn.textContent = 'Unlocking…';
-    // The barber only types a password; the account email comes from config.js
     const { error } = await sb.auth.signInWithPassword({
       email: CONFIG.loginEmail,
       password: document.getElementById('password').value,
@@ -300,7 +278,7 @@ function renderLogin() {
 
 async function start(session) {
   if (!session) { user = null; renderLogin(); return; }
-  if (user && user.id === session.user.id) return; // token refresh, nothing to reload
+  if (user && user.id === session.user.id) return;
   user = session.user;
   $app.innerHTML = `<div class="loading">Loading…</div>`;
   try {
@@ -312,7 +290,6 @@ async function start(session) {
   route();
 }
 
-// ---------- Home / dashboard ----------
 let monthOffset = 0;
 function renderHome() {
   const { clients, cuts } = data;
@@ -325,19 +302,16 @@ function renderHome() {
 
   const monthCuts = cuts.filter(c => inRange(c, start, end));
   const revenue = monthCuts.reduce((s, c) => s + (c.price || 0), 0);
-  // Compare against the same stretch of last month, so the 5th isn't judged against a whole month
   const daysIn = (end - start) / DAY_MS | 0;
   const prevCutoff = isCurrent ? new Date(prevStart.getFullYear(), prevStart.getMonth(), now.getDate() + 1) : start;
   const prevRevenue = cuts.filter(c => inRange(c, prevStart, prevCutoff < start ? prevCutoff : start)).reduce((s, c) => s + (c.price || 0), 0);
 
-  // First visit per client decides new vs returning
   const firstVisit = {};
   for (const c of cuts) if (!firstVisit[c.clientId] || c.date < firstVisit[c.clientId]) firstVisit[c.clientId] = c.date;
   const monthClients = [...new Set(monthCuts.map(c => c.clientId))];
   const newCount = monthClients.filter(id => inRange({ date: firstVisit[id] }, start, end)).length;
   const retCount = monthClients.length - newCount;
 
-  // Revenue by day of month and by weekday
   const byDay = Array(daysIn).fill(0);
   const byWeekday = Array(7).fill(0);
   for (const c of monthCuts) {
@@ -348,7 +322,7 @@ function renderHome() {
   const maxDay = Math.max(...byDay);
   const maxW = Math.max(...byWeekday);
   const bestW = maxW > 0 ? byWeekday.indexOf(maxW) : -1;
-  const weekdayCount = Array(7).fill(0); // how many of each weekday he worked, for a per-day average
+  const weekdayCount = Array(7).fill(0);
   const worked = new Set(monthCuts.map(c => new Date(c.date).toDateString()));
   worked.forEach(ds => weekdayCount[new Date(ds).getDay()]++);
 
@@ -443,7 +417,6 @@ function renderHome() {
   };
 }
 
-// ---------- Client portfolio ----------
 function renderClients() {
   const overdueCount = overdueClients().length;
   const cutsBy = cutsByClient();
@@ -484,7 +457,6 @@ function renderClients() {
   draw('');
 }
 
-// ---------- Client profile ----------
 function renderClient(id) {
   const client = data.clients.find(c => c.id === id);
   if (!client) return go('#clients');
@@ -572,13 +544,12 @@ function renderClient(id) {
     renderClient(id);
   };
 
-  // Two taps to delete, so a stray tap can't wipe a cut
   $app.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
     if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Tap to confirm'; b.classList.add('armed'); return; }
     const cutId = b.dataset.del;
     b.disabled = true;
     const ph = data.photos.filter(p => p.cutId === cutId);
-    const { error } = await sb.from('cuts').delete().eq('id', cutId); // photo rows go with it
+    const { error } = await sb.from('cuts').delete().eq('id', cutId);
     if (error) { b.disabled = false; return toast('Couldn’t delete: ' + error.message, true); }
     await removeFiles(ph);
     data.cuts = data.cuts.filter(c => c.id !== cutId);
@@ -595,7 +566,7 @@ function renderClient(id) {
       return;
     }
     rm.disabled = true; rm.textContent = 'Removing…';
-    const { error } = await sb.from('clients').delete().eq('id', id); // cuts and photo rows go with it
+    const { error } = await sb.from('clients').delete().eq('id', id);
     if (error) { rm.disabled = false; rm.textContent = `Yes, remove ${first}`; return toast('Couldn’t remove: ' + error.message, true); }
     await removeFiles(mine);
     data.clients = data.clients.filter(c => c.id !== id);
@@ -606,7 +577,6 @@ function renderClient(id) {
     go('#clients');
   };
 }
-// Email sign-up and what's been sent, on the client profile
 function emailCard(client, upcoming) {
   if (!emailReady) return '';
   const first = esc(client.name.split(' ')[0]);
@@ -670,7 +640,6 @@ function wireEmailCard(client, upcoming) {
     if (email === client.email) return renderClient(client.id);
     const added = email && !client.email;
     save({ email }, email ? (client.email ? 'Email updated' : 'Reminders on') : 'Email removed').then(async () => {
-      // Already booked? Send the confirmation they missed
       if (added && upcoming && client.email === email && !apptEmails(upcoming).confirmation && await confirmBooking(upcoming)) {
         toast(`Confirmation emailed to ${client.name.split(' ')[0]}`);
         if (location.hash === '#client-' + client.id) renderClient(client.id);
@@ -686,7 +655,6 @@ async function removeFiles(photos) {
   for (let i = 0; i < paths.length; i += 100) await sb.storage.from(BUCKET).remove(paths.slice(i, i + 100));
 }
 
-// ---------- Log cut ----------
 const PRICE_CHIPS = [25, 30, 35, 40, 50];
 const TIME_CHIPS = [20, 30, 45, 60];
 let apptToLog = null; // set when "Log this cut" is tapped on a booking
@@ -700,7 +668,7 @@ function renderLog(presetId) {
   const state = {
     mode: clients.length ? 'returning' : 'new',
     client: presetId ? clients.find(c => c.id === presetId) || null : null,
-    files: [],      // { full, thumb, url }
+    files: [],
     price: '',
     minutes: '',
     style: '',
@@ -826,7 +794,6 @@ function renderLog(presetId) {
     nameEl.focus();
   });
 
-  // Photos: shrink right away so Save only has to upload
   const cam = document.getElementById('camInput'), lib = document.getElementById('libInput');
   $('takePhoto').onclick = () => cam.click();
   $('uploadPhoto').onclick = () => lib.click();
@@ -848,7 +815,6 @@ function renderLog(presetId) {
     $('thumbs').querySelectorAll('[data-i]').forEach(b => b.onclick = () => { state.files.splice(+b.dataset.i, 1); drawThumbs(); });
   }
 
-  // Price + time
   function drawPrice() {
     $('price').value = state.price;
     $('priceChips').querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.dataset.v === state.price));
@@ -878,7 +844,7 @@ function renderLog(presetId) {
     const btn = $('save');
     btn.disabled = true; btn.textContent = 'Saving…';
     try {
-      await pending; // photos still being shrunk
+      await pending;
       let client = state.client || clients.find(c => norm(c.name) === norm(typed));
       const isNew = !client;
       if (isNew) client = { id: uuid(), name: typed, createdAt: new Date().toISOString() };
@@ -910,7 +876,7 @@ function renderLog(presetId) {
         const { error } = await sb.from('clients').insert({ id: client.id, name: client.name });
         if (error) throw error;
         data.clients.push(client);
-        state.client = client; // a retry after a failure below must not add the client twice
+        state.client = client;
       }
       const { error: cutErr } = await sb.from('cuts').insert({
         id: cut.id, client_id: cut.clientId, date: cut.date, price: cut.price,
@@ -918,7 +884,6 @@ function renderLog(presetId) {
       });
       if (cutErr) throw cutErr;
       if (appt) {
-        // Mark the booking as done; the cut is saved either way
         const { error } = await sb.from('appointments').update({ cut_id: cut.id }).eq('id', appt.id);
         if (!error) appt.cutId = cut.id;
       }
@@ -927,7 +892,6 @@ function renderLog(presetId) {
         if (error) throw error;
       }
 
-      // Show the new photos straight from the phone's copy, no need to download them again
       state.files.forEach((f, i) => {
         photoUrls[photos[i].thumbPath] = URL.createObjectURL(f.thumb);
         photoUrls[photos[i].path] = URL.createObjectURL(f.full);
@@ -949,8 +913,7 @@ function toLocalInput(d) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-// ---------- Schedule ----------
-const DAY_OPEN = 9 * 60;            // first slot offered on an empty day, in minutes after midnight
+const DAY_OPEN = 9 * 60;
 const LEN_CHIPS = [15, 30, 45, 60];
 let schedDay = startOfDay(new Date());
 
@@ -963,8 +926,6 @@ function dayLabel(d) {
 }
 const apptsOn = day => data.appts.filter(a => dayKey(a.start) === dayKey(day)).sort((a, b) => a.start.localeCompare(b.start));
 
-// Projected length and price for a client, from their past cuts. New clients
-// get the shop-wide average length.
 function projection(clientId) {
   const s = clientId ? clientStats(data.cuts.filter(c => c.clientId === clientId)) : null;
   const shopAvg = avg(data.cuts.filter(c => c.minutes > 0).map(c => c.minutes));
@@ -973,7 +934,6 @@ function projection(clientId) {
   return { minutes, price: s && s.count ? s.avgPrice : 0, basis: fromClient ? 'client' : shopAvg ? 'shop' : 'default', count: s ? s.count : 0 };
 }
 
-// Earliest start on `day` with room for `len` minutes, at or after `from` (minutes after midnight)
 function nextOpen(day, len, from) {
   const base = startOfDay(day).getTime();
   let t = from ?? DAY_OPEN;
@@ -988,7 +948,6 @@ function nextOpen(day, len, from) {
   return t;
 }
 
-// "Next: Marcus 2:30 PM" under the home button
 function nextUpLine() {
   if (!scheduleReady) return '';
   const now = new Date();
@@ -1009,7 +968,6 @@ function renderSchedule() {
   }
   const today = startOfDay(new Date());
   const isToday = dayKey(schedDay) === dayKey(today);
-  // Week strip, Monday first
   const monday = new Date(schedDay); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
   const week = Array.from({ length: 7 }, (_, i) => new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i));
   const counts = {};
@@ -1079,7 +1037,6 @@ function renderSchedule() {
   $('book').onclick = () => openBooking({});
 }
 
-// "Confirmation sent · reminder goes out Fri 2:00 PM" on an open booking
 function bookingMailLine(appt, client) {
   if (!emailReady || appt.cutId || apptEnd(appt) < new Date()) return '';
   if (!client?.email) return `<div class="mail-line muted">${icon('mail')}<span>No email on file for reminders</span></div>`;
@@ -1096,9 +1053,6 @@ function bookingMailLine(appt, client) {
 
 function closeSheet() { document.querySelectorAll('.sheet-wrap').forEach(el => el.remove()); document.body.classList.remove('sheet-open'); }
 
-// One sheet for booking a new client and for changing an existing booking.
-// Booking keeps the sheet open and moves to the next open slot, so a whole day
-// can be filled in one go.
 function openBooking({ appt, at }) {
   closeSheet();
   const editing = !!appt;
@@ -1178,7 +1132,6 @@ function openBooking({ appt, at }) {
     const end = new Date(startDate().getTime() + state.minutes * 60000);
     const why = p.basis === 'client' ? `${first || state.client.name.split(' ')[0]} averages ${p.minutes} min` : p.basis === 'shop' ? `Your average cut is ${p.minutes} min` : '';
     $('bProj').innerHTML = `${icon('clock')}<span>${fmtTime(startDate())} – <b>${fmtTime(end)}</b>${why ? ' · ' + why : ''}${p.price ? ` · usually ${money(Math.round(p.price))}` : ''}</span>`;
-    // Overlap check against the rest of that day
     const s0 = startDate(), e0 = end;
     const clash = apptsOn(state.day).filter(a => (!editing || a.id !== appt.id) && new Date(a.start) < e0 && apptEnd(a) > s0);
     $('bWarn').textContent = clash.length ? `Overlaps ${clash.map(a => (data.clients.find(c => c.id === a.clientId)?.name.split(' ')[0] || 'a client') + ' at ' + fmtTime(a.start)).join(', ')}` : '';
@@ -1294,7 +1247,6 @@ function openBooking({ appt, at }) {
       const { error } = await sb.from('appointments').insert({ id: a.id, client_id: a.clientId, starts_at: a.start, minutes: a.minutes, notes: a.notes });
       if (error) throw error;
       data.appts.push(a);
-      // Ready for the next one, right after this booking
       schedDay = state.day;
       renderSchedule();
       state.booked.push(`${client.name.split(' ')[0]} ${fmtTime(a.start)}`);
@@ -1323,9 +1275,7 @@ function openBooking({ appt, at }) {
   draw();
 }
 
-// ---------- Overdue clients ----------
-// Clients past their usual gap. Pick who to email, add openings, send.
-let nudge = { picked: null, openings: [], note: '', extra: null }; // extra: a client sent here from their profile
+let nudge = { picked: null, openings: [], note: '', extra: null };
 function slotLabel(o) {
   const at = m => {
     const h = Math.floor(m / 60) % 24, mm = m % 60;
@@ -1343,7 +1293,6 @@ function renderOverdue() {
   const lastNudge = {};
   for (const e of data.emails) if (e.kind === 'nudge' && (!lastNudge[e.clientId] || e.sentAt > lastNudge[e.clientId])) lastNudge[e.clientId] = e.sentAt;
   const recentlyNudged = id => lastNudge[id] && Date.now() - new Date(lastNudge[id]) < 7 * DAY_MS;
-  // Everyone who can get an email starts picked, unless they were emailed this week
   if (!nudge.picked) nudge.picked = new Set(rows.filter(r => canEmail(r.cl) && !recentlyNudged(r.cl.id)).map(r => r.cl.id));
   const photoBy = latestPhotoByClient();
   const today = startOfDay(new Date());
@@ -1450,7 +1399,6 @@ function renderOverdue() {
   };
 }
 
-// ---------- Boot ----------
 if (!sb) {
   $app.innerHTML = `<div class="loading"><div>CutFolio isn’t connected to its database yet.<br>Add the Supabase URL, anon key, and login email to <b>config.js</b>.</div></div>`;
 } else {

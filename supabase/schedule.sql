@@ -1,6 +1,3 @@
--- CutFolio schedule: adds the appointments table.
--- Paste into Supabase → SQL Editor → New query, then press Run. Safe to run more than once.
--- (Already included in schema.sql for new setups.)
 create table if not exists public.appointments (
   id          uuid primary key default gen_random_uuid(),
   owner       uuid not null default auth.uid() references auth.users on delete cascade,
