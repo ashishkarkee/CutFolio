@@ -6,6 +6,7 @@ A private web app for one independent barber, built for iPhone Safari.
 - **Log cut:** pick a returning client by typing their name (or add a new one), take or upload photos, tap a price and time, save.
 - **Client portfolio:** searchable list of clients. Each profile has past cut photos, average price, average time, and transaction history.
 - **View schedule:** a week strip and the day's bookings. Book a client by name and the length is projected from their average cut time (or your shop average for new clients); the next open slot is filled in for you, and the sheet stays open so you can book a whole day in a row. Tap a booking to view the client's profile, log the cut, move it, or remove it.
+- **Email reminders (AWS):** add a client's email on their profile and they get a confirmation when booked and a reminder 24 hours before. The profile and booking show what was sent. **Overdue** lists clients past their usual gap; pick them, tap your openings, and email them all at once. Runs on AWS Lambda and EventBridge Scheduler, sending through Gmail for free (or Amazon SES). Setup is in [aws/README.md](aws/README.md).
 
 It's plain HTML, CSS, and JavaScript with no build step. Data and photos are stored in [Supabase](https://supabase.com), and only the signed-in barber can read them.
 
@@ -17,6 +18,8 @@ It's plain HTML, CSS, and JavaScript with no build step. Data and photos are sto
 | `config.js` | Supabase project URL and anon key |
 | `supabase/schema.sql` | Tables, photo bucket, and access rules |
 | `supabase/schedule.sql` | Just the appointments table, for databases set up before the schedule existed |
+| `supabase/reminders.sql` | Client emails and the email log, for databases set up before reminders existed |
+| `aws/` | Email reminders: Lambda code, SAM template (Lambda, Function URL, EventBridge schedule), and setup steps |
 | `vendor/supabase.js` | supabase-js 2.117.3 (UMD build), bundled so the app doesn't depend on a CDN |
 | `manifest.webmanifest`, `icons/` | Home Screen name and icon |
 

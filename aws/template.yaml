@@ -1,0 +1,105 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  CutFolio email reminders. One Lambda that sends booking confirmations,
+  24-hour reminders (run every 15 minutes by EventBridge Scheduler), and
+  come-back emails to overdue clients, through Gmail or Amazon SES.
+
+Parameters:
+  SupabaseUrl:
+    Type: String
+    Description: Supabase Project URL, e.g. https://abcd.supabase.co
+  SupabaseSecretKey:
+    Type: String
+    NoEcho: true
+    Description: Supabase secret key (sb_secret_...) from Project Settings > API Keys. Stays in Lambda, never in the app.
+  FromEmail:
+    Type: String
+    Default: lucasfadez.donotreply@gmail.com
+    Description: The Gmail address emails are sent from (or an SES-verified address if you use SES)
+  GmailAppPassword:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: 16-character Google app password for FromEmail. Leave blank to send through SES instead.
+  ReplyToEmail:
+    Type: String
+    Default: ''
+    Description: Where client replies go (the barber's own email). Leave blank to use FromEmail.
+  BarberName:
+    Type: String
+    Default: Lucas
+    Description: Signs the emails and shows as the sender name
+  InstagramHandle:
+    Type: String
+    Default: ''
+    Description: Optional. Emails say "Feel free to message me on Instagram (@handle)"
+  ShopAddress:
+    Type: String
+    Default: ''
+    Description: Optional, shown in confirmation and reminder emails
+  ShopTimeZone:
+    Type: String
+    Default: America/Los_Angeles
+    Description: IANA time zone the shop is in, e.g. America/Chicago or America/Los_Angeles
+  AppOrigin:
+    Type: String
+    Default: https://ashishkarkee.github.io
+    Description: The site allowed to call the function (no path, no trailing slash)
+
+Resources:
+  RemindersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-reminders'
+      CodeUri: reminders/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 256
+      Timeout: 60
+      Environment:
+        Variables:
+          SUPABASE_URL: !Ref SupabaseUrl
+          SUPABASE_SECRET_KEY: !Ref SupabaseSecretKey
+          FROM_EMAIL: !Ref FromEmail
+          GMAIL_APP_PASSWORD: !Ref GmailAppPassword
+          REPLY_TO_EMAIL: !Ref ReplyToEmail
+          BARBER_NAME: !Ref BarberName
+          INSTAGRAM_HANDLE: !Ref InstagramHandle
+          SHOP_ADDRESS: !Ref ShopAddress
+          SHOP_TIME_ZONE: !Ref ShopTimeZone
+      FunctionUrlConfig:
+        AuthType: NONE # the app sends the barber's Supabase token, which the function checks
+        Cors:
+          AllowOrigins: [!Ref AppOrigin, 'http://localhost:8000']
+          AllowMethods: [POST]
+          AllowHeaders: [authorization, content-type]
+          MaxAge: 3600
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ses:SendEmail
+              Resource: '*'
+            - Effect: Allow
+              Action: lambda:GetFunctionUrlConfig
+              Resource: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-reminders'
+      Events:
+        Every15Minutes:
+          Type: ScheduleV2 # EventBridge Scheduler
+          Properties:
+            ScheduleExpression: rate(15 minutes)
+            Input: '{"job":"reminders"}'
+            RetryPolicy:
+              MaximumRetryAttempts: 0 # the next run 15 minutes later picks up anything missed
+
+  RemindersLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-reminders'
+      RetentionInDays: 14
+
+Outputs:
+  RemindersUrl:
+    Description: Paste this into config.js as remindersUrl
+    Value: !GetAtt RemindersFunctionUrl.FunctionUrl

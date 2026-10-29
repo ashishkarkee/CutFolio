@@ -11,10 +11,11 @@ const URL_TTL = 60 * 60 * 24; // signed photo links last a day; refreshed on eac
 
 // Everything is loaded once after sign-in and kept in memory; writes go to
 // Supabase first and then update this copy.
-const data = { clients: [], cuts: [], photos: [], appts: [] };
+const data = { clients: [], cuts: [], photos: [], appts: [], emails: [] };
 const photoUrls = {}; // storage path -> signed URL
 let user = null;
 let scheduleReady = true; // false until the appointments table exists in Supabase
+let emailReady = true;    // false until supabase/reminders.sql has been run
 
 async function fetchAll(table) {
   const rows = [];
@@ -26,9 +27,10 @@ async function fetchAll(table) {
     if (page.length < PAGE) return rows;
   }
 }
-const toClient = r => ({ id: r.id, name: r.name, createdAt: r.created_at });
+const toClient = r => ({ id: r.id, name: r.name, createdAt: r.created_at, email: r.email || '', reminders: r.reminders !== false });
 const toCut = r => ({ id: r.id, clientId: r.client_id, date: new Date(r.date).toISOString(), price: Number(r.price), minutes: r.minutes, style: r.style, notes: r.notes });
 const toPhoto = r => ({ id: r.id, cutId: r.cut_id, clientId: r.client_id, path: r.path, thumbPath: r.thumb_path });
+const toEmail = r => ({ id: r.id, clientId: r.client_id, apptId: r.appointment_id, kind: r.kind, startsAt: r.starts_at, to: r.to_email, sentAt: r.sent_at });
 const toAppt = r => ({ id: r.id, clientId: r.client_id, start: new Date(r.starts_at).toISOString(), minutes: r.minutes, notes: r.notes, cutId: r.cut_id });
 
 async function loadData() {
@@ -43,6 +45,12 @@ async function loadData() {
   } catch {
     data.appts = []; scheduleReady = false;
   }
+  try {
+    data.emails = (await fetchAll('emails')).map(toEmail);
+    emailReady = true;
+  } catch {
+    data.emails = []; emailReady = false;
+  }
   await signPaths(data.photos.flatMap(p => [p.path, p.thumbPath]));
 }
 async function signPaths(paths) {
@@ -55,6 +63,43 @@ async function signPaths(paths) {
 }
 const thumbUrl = p => photoUrls[p.thumbPath] || photoUrls[p.path] || '';
 const fullUrl = p => photoUrls[p.path] || photoUrls[p.thumbPath] || '';
+
+// ---------- Email reminders (AWS Lambda + SES, see aws/README.md) ----------
+const emailLive = () => emailReady && !!CONFIG.remindersUrl;
+const canEmail = client => emailLive() && !!client?.email && client.reminders;
+// Calls the reminders Lambda with the barber's login token, which it checks
+async function callReminders(body) {
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch(CONFIG.remindersUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${session?.access_token || ''}` },
+    body: JSON.stringify(body),
+  });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(out.error || `Email service error ${res.status}`);
+  return out;
+}
+// Send a booking confirmation if the client has reminders on. Never blocks the booking.
+async function confirmBooking(appt) {
+  const client = data.clients.find(c => c.id === appt.clientId);
+  if (!canEmail(client)) return false;
+  try {
+    const out = await callReminders({ action: 'confirm', appointmentId: appt.id });
+    if (out.email) data.emails.push(toEmail(out.email));
+    return !!out.sent;
+  } catch (err) {
+    toast('Booked, but the confirmation email failed: ' + err.message, true);
+    return false;
+  }
+}
+// The confirmation and reminder sent for a booking's current time
+function apptEmails(appt) {
+  const t = new Date(appt.start).getTime();
+  const mine = data.emails.filter(e => e.apptId === appt.id && e.startsAt && new Date(e.startsAt).getTime() === t);
+  return { confirmation: mine.find(e => e.kind === 'confirmation'), reminder: mine.find(e => e.kind === 'reminder') };
+}
+const EMAIL_KINDS = { confirmation: 'Booking confirmation', reminder: '24-hour reminder', nudge: 'Overdue reminder' };
+const fmtWhen = iso => `${new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
 
 // ---------- Helpers ----------
 const $app = document.getElementById('app');
@@ -98,6 +143,8 @@ const ICONS = {
   minus: '<path d="M5 12h14"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  mail: '<rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="m3.5 7 8.5 6 8.5-6"/>',
+  alert: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5M12 16h.01"/>',
 };
 const icon = (name, cls = '') => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
 
@@ -171,6 +218,17 @@ function latestPhotoByClient() {
   }
   return by;
 }
+// Clients past their usual gap with nothing booked, most overdue first
+function overdueClients() {
+  const cutsBy = cutsByClient();
+  const now = new Date();
+  const booked = new Set(data.appts.filter(a => !a.cutId && apptEnd(a) > now).map(a => a.clientId));
+  return data.clients.map(cl => ({ cl, s: clientStats(cutsBy[cl.id] || []) }))
+    .filter(r => r.s.due && !booked.has(r.cl.id))
+    .map(r => ({ ...r, late: Math.max(1, Math.round((now - new Date(r.s.last.date)) / DAY_MS - r.s.every)) }))
+    .sort((a, b) => b.late / b.s.every - a.late / a.s.every);
+}
+const overdueBanner = n => n ? `<button class="banner" data-go="#overdue">${icon('alert')}<span><b>${plural(n, 'client')}</b> ${n === 1 ? 'is' : 'are'} overdue for a cut</span>${icon('right', 'chev')}</button>` : '';
 const avatar = (client, photo) => `<div class="avatar">${photo ? `<img src="${esc(thumbUrl(photo))}" alt="" loading="lazy">` : esc(initials(client.name))}</div>`;
 const fmtTime = d => new Date(d).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 const dayKey = d => { d = new Date(d); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; };
@@ -185,6 +243,7 @@ const routes = [
   [/^#client-([\w-]+)$/, renderClient],
   [/^#log(?:-([\w-]+))?$/, renderLog],
   [/^#schedule$/, renderSchedule],
+  [/^#overdue$/, renderOverdue],
 ];
 let clientBack = '#clients'; // where the back button on a client profile goes
 let lastHash = '';
@@ -193,7 +252,7 @@ function route() {
   closeSheet();
   if (!user) return;
   const hash = location.hash || '#home';
-  if (hash.startsWith('#client-') && (lastHash === '#schedule' || lastHash === '#clients')) clientBack = lastHash;
+  if (hash.startsWith('#client-') && ['#schedule', '#clients', '#overdue'].includes(lastHash)) clientBack = lastHash;
   lastHash = hash;
   for (const [re, fn] of routes) {
     const m = hash.match(re);
@@ -318,6 +377,7 @@ function renderHome() {
       <button class="btn btn-tile" data-go="#clients">${icon('users')}Client portfolio</button>
       <button class="btn btn-tile" data-go="#schedule">${icon('calendar')}View schedule${nextUpLine()}</button>
     </div>
+    ${overdueBanner(overdueClients().length)}
 
     <div class="month">
       <h2>${monthName}<small>${ref.getFullYear()}</small></h2>
@@ -392,11 +452,13 @@ function renderClients() {
 
   $app.innerHTML = `
     ${topbar('Clients')}
+    ${overdueBanner(overdueClients().length)}
     <label class="search">${icon('search')}<input id="q" type="search" placeholder="Search by name or style" autocomplete="off" autocorrect="off"></label>
     <div class="count-line" id="count"></div>
     <div id="list"></div>
   `;
   wireBack();
+  $app.querySelectorAll('.banner').forEach(b => b.onclick = () => go(b.dataset.go));
   const list = document.getElementById('list'), count = document.getElementById('count');
   const draw = (q) => {
     const nq = norm(q);
@@ -458,6 +520,7 @@ function renderClient(id) {
     ${s.every ? `<div class="rhythm">${s.due ? '<span class="pill due">Due</span>' : ''}<span>Comes in about every <b>${everyText(s.every)}</b>. Last cut ${ago(s.last.date)}.</span></div>` : ''}
 
     <button class="btn btn-red" id="logFor">${icon('scissors')}Log a cut for ${esc(first)}</button>
+    ${emailCard(client, upcoming)}
 
     <div class="section"><h3>Cuts</h3><span class="muted" style="font-size:13px">${mine.length ? plural(mine.length, 'photo') : ''}</span></div>
     ${mine.length ? `<div class="gallery">${mine.map(p => `<button data-photo="${p.id}"><img src="${esc(thumbUrl(p))}" alt="" loading="lazy"><span class="date">${cutById[p.cutId] ? fmtShort(cutById[p.cutId].date) : ''}</span></button>`).join('')}</div>`
@@ -490,6 +553,8 @@ function renderClient(id) {
       openViewer(fullUrl(p), [c && fmtDate(c.date), c?.style, c && money(c.price || 0)].filter(Boolean).join(' · '));
     };
   });
+
+  wireEmailCard(client);
 
   const renameForm = document.getElementById('renameForm'), renameInput = document.getElementById('renameInput');
   document.getElementById('rename').onclick = () => {
@@ -541,6 +606,71 @@ function renderClient(id) {
     go('#clients');
   };
 }
+// Email sign-up and what's been sent, on the client profile
+function emailCard(client, upcoming) {
+  if (!emailReady) return '';
+  const first = esc(client.name.split(' ')[0]);
+  const form = `<form id="emailForm" class="rename" ${client.email ? 'hidden' : ''}>
+      <input class="field" id="emailInput" type="email" inputmode="email" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="name@example.com" value="${esc(client.email)}">
+      <button class="chip on" type="submit">Save</button></form>`;
+  if (!client.email) return `
+    <section class="card mail">
+      <div class="eyebrow">Email reminders</div>
+      <p class="sub">Add ${first}’s email to send a confirmation when you book and a reminder the day before.</p>
+      ${form}
+    </section>`;
+
+  let status = '';
+  if (upcoming) {
+    const { confirmation, reminder } = apptEmails(upcoming);
+    const remindAt = new Date(new Date(upcoming.start).getTime() - DAY_MS);
+    const line = (ok, text) => `<div class="${ok ? 'ok' : ''}">${icon(ok ? 'check' : 'clock')}<span>${text}</span></div>`;
+    const remText = reminder ? `24-hour reminder sent ${fmtWhen(reminder.sentAt)}`
+      : !client.reminders ? 'No reminder, unsubscribed'
+      : confirmation && new Date(confirmation.sentAt) > remindAt ? 'No reminder needed, booked less than a day ahead'
+      : `24-hour reminder goes out ${remindAt > new Date() ? fmtWhen(remindAt) : 'within 15 minutes'}`;
+    status = `<div class="mail-status">
+      <div class="eyebrow">${esc(dayLabel(upcoming.start))}, ${fmtTime(upcoming.start)} booking</div>
+      ${line(confirmation, confirmation ? `Confirmation sent ${fmtWhen(confirmation.sentAt)}` : 'No confirmation sent for this time')}
+      ${line(reminder, remText)}
+    </div>`;
+  }
+  const sent = data.emails.filter(e => e.clientId === client.id).sort((a, b) => b.sentAt.localeCompare(a.sentAt));
+  return `
+    <section class="card mail">
+      <div class="mail-head"><div class="eyebrow">Email reminders</div>${client.reminders ? `<span class="pill ret">On</span>` : `<span class="pill due">Unsubscribed</span>`}</div>
+      <div class="mail-addr" id="emailShow">${icon('mail')}<span>${esc(client.email)}</span><button class="linkbtn" id="editEmail">Edit</button></div>
+      ${form}
+      ${status}
+      ${sent.length ? `<div class="mail-log">${sent.slice(0, 4).map(e => `<div><span>${EMAIL_KINDS[e.kind]}</span><span class="muted">${fmtWhen(e.sentAt)}</span></div>`).join('')}</div>`
+        : `<p class="sub">No emails sent yet.</p>`}
+      ${client.reminders ? '' : `<button class="linkbtn" id="resub">Turn reminders back on (only if ${first} asked)</button>`}
+      ${CONFIG.remindersUrl ? '' : `<p class="sub">Emails start sending once AWS is connected.</p>`}
+    </section>`;
+}
+function wireEmailCard(client) {
+  const form = document.getElementById('emailForm');
+  if (!form) return;
+  const save = async (fields, done) => {
+    const { error } = await sb.from('clients').update(fields).eq('id', client.id);
+    if (error) return toast('Couldn’t save: ' + error.message, true);
+    Object.assign(client, fields);
+    if (done) toast(done);
+    renderClient(client.id);
+  };
+  const edit = document.getElementById('editEmail');
+  if (edit) edit.onclick = () => { form.hidden = false; document.getElementById('emailShow').hidden = true; document.getElementById('emailInput').focus(); };
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const email = document.getElementById('emailInput').value.trim().toLowerCase();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast('That email doesn’t look right', true);
+    if (email === client.email) return renderClient(client.id);
+    save({ email }, email ? (client.email ? 'Email updated' : 'Reminders on') : 'Email removed');
+  };
+  const resub = document.getElementById('resub');
+  if (resub) resub.onclick = () => save({ reminders: true }, 'Reminders back on');
+}
+
 async function removeFiles(photos) {
   const paths = photos.flatMap(p => [p.path, p.thumbPath]);
   for (let i = 0; i < paths.length; i += 100) await sb.storage.from(BUCKET).remove(paths.slice(i, i + 100));
@@ -895,12 +1025,15 @@ function renderSchedule() {
     const p = projection(a.clientId);
     const cut = a.cutId && data.cuts.find(c => c.id === a.cutId);
     const t = fmtTime(a.start).split(' ');
+    const sentNow = apptEmails(a);
+    const mailTag = sentNow.reminder ? 'reminded' : sentNow.confirmation ? 'confirmed' : '';
     rows += `<button class="row appt${cut ? ' done' : ''}" data-appt="${a.id}">
       <div class="when"><div class="t">${t[0]}</div><div class="m">${t[1] || ''}</div></div>
       ${avatar(cl, photoBy[cl.id])}
       <div class="main">
         <div class="name">${esc(cl.name)}</div>
         <div class="meta">${a.minutes} min · until ${fmtTime(apptEnd(a))}${a.notes ? ' · ' + esc(a.notes) : ''}</div>
+        ${mailTag ? `<div class="mail-tag">${icon('mail')}${mailTag}</div>` : ''}
       </div>
       <div class="right">${cut ? `<span class="pill ret">${icon('check')}${money(cut.price)}</span>` : p.price ? `<div class="num">${money(Math.round(p.price))}</div><div class="meta">usual</div>` : `<span class="pill new">New</span>`}</div>
     </button>`;
@@ -936,6 +1069,21 @@ function renderSchedule() {
   $('book').onclick = () => openBooking({});
 }
 
+// "Confirmation sent · reminder goes out Fri 2:00 PM" on an open booking
+function bookingMailLine(appt, client) {
+  if (!emailReady || appt.cutId || apptEnd(appt) < new Date()) return '';
+  if (!client?.email) return `<div class="mail-line muted">${icon('mail')}<span>No email on file for reminders</span></div>`;
+  const { confirmation, reminder } = apptEmails(appt);
+  const parts = [confirmation ? 'Confirmation sent' : 'No confirmation sent'];
+  if (reminder) parts.push(`reminder sent ${fmtWhen(reminder.sentAt)}`);
+  else {
+    const remindAt = new Date(new Date(appt.start).getTime() - DAY_MS);
+    if (client.reminders && !(confirmation && new Date(confirmation.sentAt) > remindAt)) parts.push(`reminder goes out ${remindAt > new Date() ? fmtWhen(remindAt) : 'within 15 min'}`);
+  }
+  if (!client.reminders) parts.push('unsubscribed');
+  return `<div class="mail-line">${icon('mail')}<span>${parts.join(' · ')}</span></div>`;
+}
+
 function closeSheet() { document.querySelectorAll('.sheet-wrap').forEach(el => el.remove()); document.body.classList.remove('sheet-open'); }
 
 // One sheet for booking a new client and for changing an existing booking.
@@ -967,6 +1115,7 @@ function openBooking({ appt, at }) {
           ${avatar(state.client || { name: '?' }, latestPhotoByClient()[appt.clientId])}
           <div class="main"><div class="name">${esc(state.client?.name || 'Client')}</div><div class="meta" id="bWhoMeta"></div></div>
         </div>
+        ${bookingMailLine(appt, state.client)}
         <div class="pair">
           <button class="btn" id="bProfile">${icon('users')}View profile</button>
           ${appt.cutId ? `<button class="btn" disabled>${icon('check')}Logged</button>` : `<button class="btn btn-red" id="bLog">${icon('scissors')}Log this cut</button>`}
@@ -1112,9 +1261,11 @@ function openBooking({ appt, at }) {
       btn.disabled = true; btn.textContent = 'Saving…';
       const { error } = await sb.from('appointments').update({ starts_at: starts, minutes: state.minutes, notes: state.notes.trim() }).eq('id', appt.id);
       if (error) { btn.disabled = false; btn.textContent = 'Save changes'; return toast('Couldn’t save: ' + error.message, true); }
+      const moved = new Date(appt.start).getTime() !== new Date(starts).getTime();
       Object.assign(appt, { start: starts, minutes: state.minutes, notes: state.notes.trim() });
       schedDay = state.day;
       close(); renderSchedule();
+      if (moved && await confirmBooking(appt)) { toast(`Emailed ${state.client.name.split(' ')[0]} the new time`); renderSchedule(); }
       return;
     }
     const nameEl = $('bName');
@@ -1145,6 +1296,14 @@ function openBooking({ appt, at }) {
       $('bDone').innerHTML = `${icon('check')}<span>Booked ${esc(state.booked.join(', '))}. Add the next one or close.</span>`;
       draw();
       nameEl.focus();
+      const label = state.booked[state.booked.length - 1];
+      confirmBooking(a).then(ok => {
+        if (!ok) return;
+        const i = state.booked.indexOf(label);
+        if (i >= 0) state.booked[i] += ' (confirmation emailed)';
+        if (wrap.isConnected) $('bDone').innerHTML = `${icon('check')}<span>Booked ${esc(state.booked.join(', '))}. Add the next one or close.</span>`;
+        if (location.hash === '#schedule' && !wrap.isConnected) renderSchedule();
+      });
     } catch (err) {
       toast('Couldn’t book: ' + (err.message || err) + '. Check your connection and try again.', true);
     }
@@ -1152,6 +1311,127 @@ function openBooking({ appt, at }) {
   };
 
   draw();
+}
+
+// ---------- Overdue clients ----------
+// Clients past their usual gap. Pick who to email, add openings, send.
+let nudge = { picked: null, openings: [], note: '' };
+function slotLabel(o) {
+  const at = m => {
+    const h = Math.floor(m / 60) % 24, mm = m % 60;
+    return `${h % 12 || 12}${mm ? ':' + String(mm).padStart(2, '0') : ''}`;
+  };
+  const ap = m => (Math.floor(m / 60) % 24) < 12 ? 'AM' : 'PM';
+  const range = ap(o.from) === ap(o.to) ? `${at(o.from)}–${at(o.to)} ${ap(o.to)}` : `${at(o.from)} ${ap(o.from)}–${at(o.to)} ${ap(o.to)}`;
+  return `${DAYS[new Date(o.day).getDay()]} ${range}`;
+}
+function renderOverdue() {
+  const rows = overdueClients();
+  const live = emailLive();
+  const lastNudge = {};
+  for (const e of data.emails) if (e.kind === 'nudge' && (!lastNudge[e.clientId] || e.sentAt > lastNudge[e.clientId])) lastNudge[e.clientId] = e.sentAt;
+  const recentlyNudged = id => lastNudge[id] && Date.now() - new Date(lastNudge[id]) < 7 * DAY_MS;
+  // Everyone who can get an email starts picked, unless they were emailed this week
+  if (!nudge.picked) nudge.picked = new Set(rows.filter(r => canEmail(r.cl) && !recentlyNudged(r.cl.id)).map(r => r.cl.id));
+  const photoBy = latestPhotoByClient();
+  const today = startOfDay(new Date());
+  const week = Array.from({ length: 7 }, (_, i) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + i));
+  nudge.openings = nudge.openings.filter(o => o.day >= today.getTime()).sort((a, b) => a.day - b.day || a.from - b.from);
+  const picked = rows.filter(r => nudge.picked.has(r.cl.id) && canEmail(r.cl));
+  const sample = picked[0] || rows.find(r => canEmail(r.cl));
+  const p2 = n => String(n).padStart(2, '0');
+  const hhmm = m => `${p2(Math.floor(m / 60))}:${p2(m % 60)}`;
+
+  $app.innerHTML = `
+    ${topbar('Overdue', '#home')}
+    ${rows.length ? `<div class="count-line">${plural(rows.length, 'client')} past their usual cut, with nothing booked</div>
+    <div class="group overdue">${rows.map(({ cl, s, late }) => {
+      const ok = canEmail(cl);
+      const on = ok && nudge.picked.has(cl.id);
+      const why = !emailReady ? '' : !cl.email ? 'No email · tap to add one' : !cl.reminders ? 'Unsubscribed from emails' : lastNudge[cl.id] ? `Emailed ${ago(lastNudge[cl.id])}` : '';
+      return `<button class="row${on ? ' on' : ''}${ok ? '' : ' off'}" data-id="${cl.id}" ${ok ? `role="checkbox" aria-checked="${on}"` : ''}>
+        <span class="check${ok ? '' : ' none'}">${on ? icon('check') : ''}</span>
+        ${avatar(cl, photoBy[cl.id])}
+        <div class="main">
+          <div class="name">${esc(cl.name)}</div>
+          <div class="meta">Last cut ${fmtShort(s.last.date)} · every ${everyText(s.every)}</div>
+          ${why ? `<div class="meta ${cl.email && cl.reminders ? 'sent' : ''}">${why}</div>` : ''}
+        </div>
+        <div class="right"><div class="num late">${late}</div><div class="meta">days late</div></div>
+      </button>`;
+    }).join('')}</div>` : `<div class="placeholder">${icon('check')}<h2>Nobody’s overdue</h2><p>Clients show up here once it’s been noticeably longer than their usual gap between cuts.</p></div>`}
+
+    ${rows.length && emailReady ? `
+    <div class="section"><h3>Your openings</h3><span class="muted" style="font-size:13px">tap a day</span></div>
+    <div class="days open-days">${week.map(d => {
+      const n = nudge.openings.filter(o => o.day === d.getTime()).length;
+      return `<button data-day="${d.getTime()}" class="${n ? 'on' : ''}"><span class="w">${DAYS[d.getDay()].slice(0, 2)}</span><span class="d">${d.getDate()}</span><span class="dots">${n ? icon('check') : ''}</span></button>`;
+    }).join('')}</div>
+    ${nudge.openings.length ? `<div class="group openings">${nudge.openings.map((o, i) => `
+      <div class="row">
+        <div class="main"><div class="name">${DAYS[new Date(o.day).getDay()]}</div><div class="meta">${new Date(o.day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div></div>
+        <input class="field" type="time" step="900" data-i="${i}" data-k="from" value="${hhmm(o.from)}" aria-label="From">
+        <span class="muted">to</span>
+        <input class="field" type="time" step="900" data-i="${i}" data-k="to" value="${hhmm(o.to)}" aria-label="Until">
+        <button class="icon-btn" data-rm="${i}" aria-label="Remove opening">${icon('x')}</button>
+      </div>`).join('')}</div>` : ''}
+    <textarea class="field" id="nNote" placeholder="Add a line (optional), e.g. Fades are $5 off this week">${esc(nudge.note)}</textarea>
+
+    ${sample ? `<section class="card preview">
+      <div class="eyebrow">Email preview</div>
+      <div class="subj">Haircut reminder</div>
+      <p>Hi ${esc(sample.cl.name.split(' ')[0])}, your last cut was on ${new Date(sample.s.last.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}, so you’re probably about due. Here’s when I have openings:</p>
+      ${nudge.openings.length ? `<ul>${nudge.openings.map(o => `<li>${esc(slotLabel(o))}</li>`).join('')}</ul>` : `<p class="muted">Tap a day above to add your openings.</p>`}
+      ${nudge.note.trim() ? `<p>${esc(nudge.note.trim())}</p>` : ''}
+      <p>Feel free to message me on Instagram with the time that works and I’ll book you in.</p>
+    </section>` : ''}
+    ${live ? '' : `<p class="hint">Sending turns on once AWS email is connected (see aws/README.md).</p>`}
+    <div class="savebar"><button class="btn btn-red" id="nSend" ${live && picked.length && nudge.openings.length ? '' : 'disabled'}>${icon('mail')}${picked.length ? `Email ${plural(picked.length, 'client')}` : 'Pick clients to email'}</button></div>
+    ` : ''}
+  `;
+  wireBack();
+  $app.querySelector('[data-back]').onclick = () => { nudge.picked = null; go('#home'); };
+  $app.querySelectorAll('.overdue [data-id]').forEach(b => b.onclick = () => {
+    const cl = data.clients.find(c => c.id === b.dataset.id);
+    if (!canEmail(cl)) return go('#client-' + cl.id);
+    nudge.picked.has(cl.id) ? nudge.picked.delete(cl.id) : nudge.picked.add(cl.id);
+    renderOverdue();
+  });
+  $app.querySelectorAll('.open-days [data-day]').forEach(b => b.onclick = () => {
+    const day = +b.dataset.day;
+    const has = nudge.openings.some(o => o.day === day);
+    if (has) nudge.openings = nudge.openings.filter(o => o.day !== day);
+    else {
+      const last = nudge.openings[nudge.openings.length - 1];
+      nudge.openings.push({ day, from: last ? last.from : 12 * 60, to: last ? last.to : 16 * 60 });
+    }
+    renderOverdue();
+  });
+  $app.querySelectorAll('.openings input[type=time]').forEach(inp => inp.onchange = () => {
+    const [h, m] = inp.value.split(':').map(Number);
+    if (!(h >= 0)) return;
+    const o = nudge.openings[+inp.dataset.i];
+    o[inp.dataset.k] = h * 60 + (m || 0);
+    if (o.to <= o.from) o[inp.dataset.k === 'from' ? 'to' : 'from'] = inp.dataset.k === 'from' ? Math.min(o.from + 60, 23 * 60 + 45) : Math.max(o.to - 60, 0);
+    renderOverdue();
+  });
+  $app.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { nudge.openings.splice(+b.dataset.rm, 1); renderOverdue(); });
+  const note = document.getElementById('nNote');
+  if (note) note.onchange = () => { nudge.note = note.value; renderOverdue(); };
+  const send = document.getElementById('nSend');
+  if (send) send.onclick = async () => {
+    if (note) nudge.note = note.value;
+    send.disabled = true; send.textContent = `Sending ${plural(picked.length, 'email')}…`;
+    try {
+      const out = await callReminders({ action: 'nudge', clientIds: picked.map(r => r.cl.id), openings: nudge.openings.map(slotLabel), note: nudge.note });
+      const ok = out.results.filter(r => r.sent);
+      ok.forEach(r => { data.emails.push(toEmail(r.email)); nudge.picked.delete(r.clientId); });
+      toast(ok.length === picked.length ? `Emailed ${plural(ok.length, 'client')}` : `Emailed ${ok.length} of ${picked.length}`, ok.length < picked.length);
+    } catch (err) {
+      toast('Couldn’t send: ' + err.message, true);
+    }
+    renderOverdue();
+  };
 }
 
 // ---------- Boot ----------

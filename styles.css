@@ -336,4 +336,55 @@ body.sheet-open { overflow: hidden; }
 .done-line { display: flex; align-items: center; gap: 8px; font-size: 14px; padding: 10px 12px; border-radius: 12px; background: var(--alt-soft); color: var(--alt); }
 .done-line .ico { width: 18px; height: 18px; stroke-width: 2.4; }
 
+/* ---------- Email reminders ---------- */
+.banner {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 12px 14px; border-radius: 12px; font-size: 15px;
+  background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--danger);
+}
+.banner .ico { width: 20px; height: 20px; color: var(--danger); }
+.banner span { flex: 1; }
+.banner .chev { color: var(--muted); width: 18px; height: 18px; }
+.mail { display: flex; flex-direction: column; gap: 10px; }
+.mail .sub { margin: 0; font-size: 14px; color: var(--muted); }
+.mail-head { display: flex; align-items: center; justify-content: space-between; }
+.mail-addr { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mail-addr .ico { color: var(--accent); }
+.mail-addr span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.mail-status { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 12px; background: var(--surface-2); }
+.mail-status > div:not(.eyebrow) { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.mail-status .ico { width: 17px; height: 17px; }
+.mail-status .ok { color: var(--alt); }
+.mail-status .ok .ico { stroke-width: 2.6; }
+.mail-log { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.mail-log div { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.mail-log div:last-child { border-bottom: 0; padding-bottom: 0; }
+.mail-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--alt); margin-top: 2px; }
+.mail-tag .ico { width: 13px; height: 13px; }
+.mail-line { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--alt); }
+.mail-line .ico { width: 16px; height: 16px; }
+.mail-line.muted { color: var(--muted); }
+
+.overdue .check {
+  width: 26px; height: 26px; flex: none; border-radius: 8px; border: 1.5px solid var(--line);
+  display: grid; place-items: center;
+}
+.overdue .on .check { background: var(--gold); border-color: #c49a52; color: var(--on-accent); }
+.overdue .check .ico { width: 16px; height: 16px; stroke-width: 2.8; }
+.overdue .check.none { border-style: dashed; opacity: .4; }
+.overdue .off .avatar { opacity: .6; }
+.overdue .avatar { width: 40px; height: 40px; font-size: 17px; }
+.overdue .meta.sent { color: var(--alt); }
+.overdue .late { color: var(--danger); font-size: 26px; }
+.open-days { margin-top: -4px; }
+.open-days .dots .ico { width: 14px; height: 14px; stroke-width: 2.8; }
+.openings .row { gap: 8px; padding: 10px 12px; }
+.openings .main { min-width: 74px; }
+.openings .field { width: auto; flex: 1; min-width: 0; padding: 10px 6px; text-align: center; font-size: 15px; }
+.openings .icon-btn { width: 34px; height: 34px; }
+.openings .icon-btn .ico { width: 16px; height: 16px; }
+.preview .subj { font-weight: 700; margin: 8px 0 6px; }
+.preview p { margin: 0 0 10px; font-size: 14px; color: color-mix(in srgb, var(--ink) 85%, transparent); }
+.preview ul { margin: 0 0 10px; padding-left: 20px; font-size: 14px; font-weight: 700; color: var(--accent); }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } .btn:active { transform: none; } }
