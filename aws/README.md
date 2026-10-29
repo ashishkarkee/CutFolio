@@ -90,7 +90,7 @@ Answer the prompts:
 | GmailAppPassword | the 16-character app password from step 2 (it won't show as you paste) |
 | ReplyToEmail | press Enter (replies go to the Gmail address) |
 | BarberName | press Enter for `Lucas` (signs the emails and shows as the sender) |
-| InstagramHandle | Lucas's Instagram handle, e.g. `lucascuts` (optional; emails say "Feel free to message me on Instagram") |
+| InstagramHandle | press Enter for `lucasfadez` (linked under the signature) |
 | ShopAddress | optional, shown in confirmations and reminders |
 | ShopTimeZone | press Enter for `America/Los_Angeles` (California) |
 | AppOrigin | press Enter for `https://ashishkarkee.github.io` |

@@ -23,7 +23,8 @@ const SUPABASE_KEY = env.SUPABASE_SECRET_KEY || '';
 const FROM = env.FROM_EMAIL;
 const REPLY_TO = env.REPLY_TO_EMAIL || '';
 const BARBER = env.BARBER_NAME || 'Lucas';
-const INSTAGRAM = (env.INSTAGRAM_HANDLE || '').replace(/^@/, '');
+const INSTAGRAM = (env.INSTAGRAM_HANDLE || 'lucasfadez').replace(/^@/, '');
+const INSTAGRAM_URL = `https://www.instagram.com/${INSTAGRAM}/`;
 const DM = `Feel free to message me on Instagram${INSTAGRAM ? ` (@${INSTAGRAM})` : ''}`;
 const AUTOMATED = `This is an automated message, so replies to this email aren’t read. Message me on Instagram${INSTAGRAM ? ` (@${INSTAGRAM})` : ''} instead.`;
 const ADDRESS = env.SHOP_ADDRESS || '';
@@ -200,12 +201,12 @@ async function send(to, subject, lines, unsub) {
   const parts = lines.filter(Boolean);
   const sign = BARBER;
   const text = parts.map(p => p.list ? p.list.map(s => `  • ${s}`).join('\n') : p).join('\n\n') +
-    `\n\n${sign}\n\n${AUTOMATED}\nDon’t want these emails? ${unsub}`;
+    `\n\n${sign}\n${INSTAGRAM_URL}\n\n${AUTOMATED}\nDon’t want these emails? ${unsub}`;
   const html = `<div style="font:16px/1.55 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1a1a1a;max-width:520px">` +
     parts.map(p => p.list
       ? `<ul style="padding-left:20px;margin:0 0 14px">${p.list.map(s => `<li style="margin:4px 0"><b>${esc(s)}</b></li>`).join('')}</ul>`
       : `<p style="margin:0 0 14px">${esc(p)}</p>`).join('') +
-    `<p style="margin:22px 0 0">${esc(sign)}</p>` +
+    `<p style="margin:22px 0 0">${esc(sign)}<br><a href="${esc(INSTAGRAM_URL)}" style="color:#1a1a1a">instagram.com/${esc(INSTAGRAM)}</a></p>` +
     `<p style="margin:28px 0 0;font-size:12px;color:#888">${esc(AUTOMATED)}<br>Don’t want these emails? <a href="${esc(unsub)}" style="color:#888">Unsubscribe</a></p></div>`;
   const unsubHeaders = { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' };
   if (gmail) {
