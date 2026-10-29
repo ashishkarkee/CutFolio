@@ -15,6 +15,7 @@ Parameters:
     Description: Supabase secret key (sb_secret_...) from Project Settings > API Keys. Stays in Lambda, never in the app.
   FromEmail:
     Type: String
+    Default: lucasfadez.donotreply@gmail.com
     Description: The Gmail address emails are sent from (or an SES-verified address if you use SES)
   GmailAppPassword:
     Type: String

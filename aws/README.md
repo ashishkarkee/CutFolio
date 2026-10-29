@@ -55,7 +55,7 @@ Do every step in the **same AWS region**. Pick one near you in the top-right reg
 
 ### 2. A Gmail app password
 
-Emails are sent from a Gmail account, and clients see that address. A fresh account just for Lucas (for example `lucascuts.bookings@gmail.com`) keeps your personal inbox out of it, but any Gmail account works.
+Emails are sent from a Gmail account, and clients see that address. CutFolio uses `lucasfadez.donotreply@gmail.com`, an account nobody checks. Every email says it's automated and points clients to Instagram instead.
 
 1. Sign in to that Gmail account and turn on **2-Step Verification** (Google Account → Security).
 2. Open **myaccount.google.com/apppasswords**, name it `CutFolio`, and copy the 16-character password. You'll paste it in step 4.
@@ -86,7 +86,7 @@ Answer the prompts:
 | AWS Region | the region you picked |
 | SupabaseUrl | `https://euohjxiopeufjqtsrugm.supabase.co` |
 | SupabaseSecretKey | the `sb_secret_…` key (it won't show as you paste) |
-| FromEmail | the Gmail address from step 2 |
+| FromEmail | press Enter for `lucasfadez.donotreply@gmail.com` |
 | GmailAppPassword | the 16-character app password from step 2 (it won't show as you paste) |
 | ReplyToEmail | press Enter (replies go to the Gmail address) |
 | BarberName | press Enter for `Lucas` (signs the emails and shows as the sender) |
