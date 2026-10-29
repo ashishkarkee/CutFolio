@@ -185,7 +185,7 @@ async function sendAndLog(e, context) {
   }
   try {
     const unsub = await unsubLink(e.clientId, context);
-    const res = await send(e.to, e.subject, e.lines, unsub);
+    const res = await send(e.to, e.subject, e.lines, unsub, e.kind);
     [row] = await db('PATCH', `emails?id=eq.${row.id}`, { ses_message_id: res.MessageId, sent_at: new Date().toISOString() });
     e.row = row;
     return 'sent';
@@ -197,11 +197,12 @@ async function sendAndLog(e, context) {
   }
 }
 
-async function send(to, subject, lines, unsub) {
+async function send(to, subject, lines, unsub, kind) {
   const parts = lines.filter(Boolean);
   const sign = BARBER;
-  const text = parts.map(p => p.list ? p.list.map(s => `  • ${s}`).join('\n') : p).join('\n\n') +
-    `\n\n${sign}\n${INSTAGRAM_URL}\n\n${AUTOMATED}\nDon’t want these emails? ${unsub}`;
+  const body = parts.map(p => p.list ? p.list.map(s => `  • ${s}`).join('\n') : p).join('\n\n') +
+    `\n\n${sign}\n${INSTAGRAM_URL}\n\n${AUTOMATED}`;
+  const text = `${body}\nDon’t want these emails? ${unsub}`;
   const html = `<div style="font:16px/1.55 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1a1a1a;max-width:520px">` +
     parts.map(p => p.list
       ? `<ul style="padding-left:20px;margin:0 0 14px">${p.list.map(s => `<li style="margin:4px 0"><b>${esc(s)}</b></li>`).join('')}</ul>`
@@ -210,9 +211,13 @@ async function send(to, subject, lines, unsub) {
     `<p style="margin:28px 0 0;font-size:12px;color:#888">${esc(AUTOMATED)}<br>Don’t want these emails? <a href="${esc(unsub)}" style="color:#888">Unsubscribe</a></p></div>`;
   const unsubHeaders = { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' };
   if (gmail) {
+    // From a personal Gmail account, a plain-text note with no bulk-mail
+    // headers looks like a normal email to junk filters (iCloud especially).
+    // Only overdue reminders, which are promotional, carry the unsubscribe link.
     const info = await gmail.sendMail({
       from: { name: BARBER.replace(/[<>",]/g, ''), address: FROM },
-      to, replyTo: REPLY_TO || undefined, subject, text, html, headers: unsubHeaders,
+      to, replyTo: REPLY_TO || undefined, subject,
+      text: kind === 'nudge' ? text : `${body}\nDon’t want these emails? Let me know on Instagram.`,
     });
     return { MessageId: info.messageId };
   }
