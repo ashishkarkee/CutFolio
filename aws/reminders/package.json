@@ -1,5 +1,6 @@
 {
   "name": "cutfolio-reminders",
+  "version": "1.0.0",
   "private": true,
   "description": "CutFolio email reminders Lambda",
   "type": "module",
