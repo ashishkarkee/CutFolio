@@ -9,5 +9,5 @@ window.CUTFOLIO_CONFIG = {
   loginEmail: 'barber@cutfolio.app',
   // Email reminders: the RemindersUrl that `sam deploy` prints (see aws/README.md).
   // Leave blank and the app works the same, it just doesn't send emails.
-  remindersUrl: '',
+  remindersUrl: 'https://aebqpyihzpdcxb2hlutog74j2q0gvqup.lambda-url.us-east-2.on.aws/',
 };
