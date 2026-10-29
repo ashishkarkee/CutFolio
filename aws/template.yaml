@@ -32,8 +32,8 @@ Parameters:
     Description: Signs the emails and shows as the sender name
   InstagramHandle:
     Type: String
-    Default: ''
-    Description: Optional. Emails say "Feel free to message me on Instagram (@handle)"
+    Default: lucasfadez
+    Description: Linked under the signature, and in "Feel free to message me on Instagram (@handle)"
   ShopAddress:
     Type: String
     Default: ''

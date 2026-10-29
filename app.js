@@ -1379,7 +1379,7 @@ function renderOverdue() {
 
     ${sample ? `<section class="card preview">
       <div class="eyebrow">Email preview</div>
-      <div class="subj">Haircut reminder</div>
+      <div class="subj">Booking reminder</div>
       <p>Hi ${esc(sample.cl.name.split(' ')[0])}, your last cut was on ${new Date(sample.s.last.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}, so you’re probably about due. Here’s when I have openings:</p>
       ${nudge.openings.length ? `<ul>${nudge.openings.map(o => `<li>${esc(slotLabel(o))}</li>`).join('')}</ul>` : `<p class="muted">Tap a day above to add your openings.</p>`}
       ${nudge.note.trim() ? `<p>${esc(nudge.note.trim())}</p>` : ''}

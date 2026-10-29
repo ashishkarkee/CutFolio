@@ -4,7 +4,7 @@ Clients who have an email on their profile get:
 
 - **A booking confirmation** ("Haircut confirmed") as soon as they're booked (or moved).
 - **A 24-hour reminder** ("Haircut reminder"): "You're confirmed for a haircut tomorrow at 2 PM!"
-- **An overdue reminder** ("Haircut reminder") when the barber picks them on the Overdue screen: "Your last cut was on September 28… Here's when I have openings: Saturday 12–4 PM, Sunday 4–8 PM."
+- **An overdue reminder** ("Booking reminder") when the barber picks them on the Overdue screen: "Your last cut was on September 28… Here's when I have openings: Saturday 12–4 PM, Sunday 4–8 PM."
 
 Emails come from Lucas, are signed "Lucas", and point clients to Instagram for changes.
 
@@ -90,7 +90,7 @@ Answer the prompts:
 | GmailAppPassword | the 16-character app password from step 2 (it won't show as you paste) |
 | ReplyToEmail | press Enter (replies go to the Gmail address) |
 | BarberName | press Enter for `Lucas` (signs the emails and shows as the sender) |
-| InstagramHandle | Lucas's Instagram handle, e.g. `lucascuts` (optional; emails say "Feel free to message me on Instagram") |
+| InstagramHandle | press Enter for `lucasfadez` (linked under the signature) |
 | ShopAddress | optional, shown in confirmations and reminders |
 | ShopTimeZone | press Enter for `America/Los_Angeles` (California) |
 | AppOrigin | press Enter for `https://ashishkarkee.github.io` |
