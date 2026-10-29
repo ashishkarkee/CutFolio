@@ -337,6 +337,9 @@ body.sheet-open { overflow: hidden; }
 .done-line .ico { width: 18px; height: 18px; stroke-width: 2.4; }
 
 /* ---------- Email reminders ---------- */
+.overdue-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; }
+.overdue-chip .ico { width: 17px; height: 17px; color: var(--accent); }
+.overdue-chip .pill { padding: 2px 7px; }
 .banner {
   display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
   padding: 12px 14px; border-radius: 12px; font-size: 15px;
