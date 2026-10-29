@@ -40,7 +40,7 @@ Parameters:
     Description: Optional, shown in confirmation and reminder emails
   ShopTimeZone:
     Type: String
-    Default: America/New_York
+    Default: America/Los_Angeles
     Description: IANA time zone the shop is in, e.g. America/Chicago or America/Los_Angeles
   AppOrigin:
     Type: String

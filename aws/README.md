@@ -92,7 +92,7 @@ Answer the prompts:
 | BarberName | press Enter for `Lucas` (signs the emails and shows as the sender) |
 | InstagramHandle | Lucas's Instagram handle, e.g. `lucascuts` (optional; emails say "Feel free to message me on Instagram") |
 | ShopAddress | optional, shown in confirmations and reminders |
-| ShopTimeZone | e.g. `America/Chicago`, `America/New_York`, `America/Los_Angeles` |
+| ShopTimeZone | press Enter for `America/Los_Angeles` (California) |
 | AppOrigin | press Enter for `https://ashishkarkee.github.io` |
 | Confirm changes before deploy | `N` |
 | Allow SAM CLI IAM role creation | `Y` |
