@@ -49,8 +49,8 @@ export const handler = async (event, context) => {
     if (http.path === '/unsubscribe') return await unsubscribe(event);
     if (http.method !== 'POST') return reply(404, { error: 'Not found' });
 
-    const user = await signedInUser(event.headers?.authorization);
-    if (!user) return reply(401, { error: 'Sign in again' });
+    const { user, problem } = await signedInUser(event.headers?.authorization);
+    if (!user) return reply(401, { error: problem });
     const body = JSON.parse(event.isBase64Encoded ? Buffer.from(event.body || '', 'base64').toString() : event.body || '{}');
     if (body.action === 'confirm') return reply(200, await confirm(user.id, body.appointmentId, context));
     if (body.action === 'nudge') return reply(200, await nudge(user.id, body, context));
@@ -270,11 +270,19 @@ async function db(method, path, body) {
   return json;
 }
 
+// Asks Supabase who the token belongs to. On failure, says why, so a bad
+// secret key in the deploy isn't mistaken for an expired login.
 async function signedInUser(authorization) {
   const token = (authorization || '').replace(/^Bearer\s+/i, '');
-  if (!token) return null;
+  if (!token) return { problem: 'Sign in again (no login token sent)' };
   const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: SUPABASE_KEY, authorization: `Bearer ${token}` } });
-  return res.ok ? res.json() : null;
+  if (res.ok) return { user: await res.json() };
+  const body = await res.text();
+  console.error(`Supabase auth check failed: ${res.status} ${body}`);
+  let msg = '';
+  try { const j = JSON.parse(body); msg = j.msg || j.message || j.error_description || j.error || ''; } catch { msg = body.slice(0, 120); }
+  if (/api key|apikey/i.test(msg)) return { problem: `AWS has the wrong Supabase secret key (${msg}). Redeploy with the sb_secret_ key.` };
+  return { problem: `Sign in again (Supabase said ${res.status}${msg ? ': ' + msg : ''})` };
 }
 
 // ---------- Helpers ----------
