@@ -8,7 +8,7 @@ Clients who have an email on their profile get:
 
 Emails come from Lucas, are signed "Lucas", and point clients to Instagram for changes.
 
-Every email has an unsubscribe link, and every email sent is logged in Supabase so the app can show it on the client's profile and on the booking.
+Booking reminders have an unsubscribe link (confirmations and 24-hour reminders tell clients to message on Instagram instead, which keeps them looking like personal emails to junk filters). Every email sent is logged in Supabase so the app can show it on the client's profile and on the booking.
 
 ## How it works
 
@@ -126,6 +126,7 @@ Logs for every run are in **CloudWatch → Log groups → /aws/lambda/cutfolio-r
 - **"Email service error 403" in the app:** the Function URL is missing its public invoke permission. In CloudShell run
   `aws lambda add-permission --function-name cutfolio-reminders --statement-id UrlInvoke --action lambda:InvokeFunction --principal '*' --invoked-via-function-url`
 - **"Invalid login" / "Username and Password not accepted":** the Gmail app password is wrong or was revoked, or FromEmail isn't the account it belongs to. Make a new app password and redeploy.
+- **Emails land in Junk (iPhone Mail / iCloud):** a new Gmail account has no sending history yet. Have a few clients tap *Not Junk* or add the sender to Contacts; it improves as more emails get opened. A domain plus SES (below) is the lasting fix.
 - **Reminder times are off by hours:** the `ShopTimeZone` parameter is wrong. Redeploy with the right one.
 
 ## Switching to SES later
