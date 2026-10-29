@@ -554,7 +554,7 @@ function renderClient(id) {
     };
   });
 
-  wireEmailCard(client);
+  wireEmailCard(client, upcoming);
 
   const renameForm = document.getElementById('renameForm'), renameInput = document.getElementById('renameInput');
   document.getElementById('rename').onclick = () => {
@@ -644,13 +644,16 @@ function emailCard(client, upcoming) {
       ${status}
       ${sent.length ? `<div class="mail-log">${sent.slice(0, 4).map(e => `<div><span>${EMAIL_KINDS[e.kind]}</span><span class="muted">${fmtWhen(e.sentAt)}</span></div>`).join('')}</div>`
         : `<p class="sub">No emails sent yet.</p>`}
+      ${canEmail(client) ? `<button class="btn" id="sendNudge">${icon('mail')}Send a booking reminder</button>` : ''}
       ${client.reminders ? '' : `<button class="linkbtn" id="resub">Turn reminders back on (only if ${first} asked)</button>`}
       ${CONFIG.remindersUrl ? '' : `<p class="sub">Emails start sending once AWS is connected.</p>`}
     </section>`;
 }
-function wireEmailCard(client) {
+function wireEmailCard(client, upcoming) {
   const form = document.getElementById('emailForm');
   if (!form) return;
+  const nudgeBtn = document.getElementById('sendNudge');
+  if (nudgeBtn) nudgeBtn.onclick = () => { nudge.extra = client.id; nudge.picked = new Set([client.id]); go('#overdue'); };
   const save = async (fields, done) => {
     const { error } = await sb.from('clients').update(fields).eq('id', client.id);
     if (error) return toast('Couldn’t save: ' + error.message, true);
@@ -665,7 +668,14 @@ function wireEmailCard(client) {
     const email = document.getElementById('emailInput').value.trim().toLowerCase();
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast('That email doesn’t look right', true);
     if (email === client.email) return renderClient(client.id);
-    save({ email }, email ? (client.email ? 'Email updated' : 'Reminders on') : 'Email removed');
+    const added = email && !client.email;
+    save({ email }, email ? (client.email ? 'Email updated' : 'Reminders on') : 'Email removed').then(async () => {
+      // Already booked? Send the confirmation they missed
+      if (added && upcoming && client.email === email && !apptEmails(upcoming).confirmation && await confirmBooking(upcoming)) {
+        toast(`Confirmation emailed to ${client.name.split(' ')[0]}`);
+        if (location.hash === '#client-' + client.id) renderClient(client.id);
+      }
+    });
   };
   const resub = document.getElementById('resub');
   if (resub) resub.onclick = () => save({ reminders: true }, 'Reminders back on');
@@ -1315,7 +1325,7 @@ function openBooking({ appt, at }) {
 
 // ---------- Overdue clients ----------
 // Clients past their usual gap. Pick who to email, add openings, send.
-let nudge = { picked: null, openings: [], note: '' };
+let nudge = { picked: null, openings: [], note: '', extra: null }; // extra: a client sent here from their profile
 function slotLabel(o) {
   const at = m => {
     const h = Math.floor(m / 60) % 24, mm = m % 60;
@@ -1327,6 +1337,8 @@ function slotLabel(o) {
 }
 function renderOverdue() {
   const rows = overdueClients();
+  const extra = nudge.extra && !rows.some(r => r.cl.id === nudge.extra) && data.clients.find(c => c.id === nudge.extra);
+  if (extra) rows.unshift({ cl: extra, s: clientStats(data.cuts.filter(c => c.clientId === extra.id)), late: 0 });
   const live = emailLive();
   const lastNudge = {};
   for (const e of data.emails) if (e.kind === 'nudge' && (!lastNudge[e.clientId] || e.sentAt > lastNudge[e.clientId])) lastNudge[e.clientId] = e.sentAt;
@@ -1343,8 +1355,8 @@ function renderOverdue() {
   const hhmm = m => `${p2(Math.floor(m / 60))}:${p2(m % 60)}`;
 
   $app.innerHTML = `
-    ${topbar('Overdue', '#home')}
-    ${rows.length ? `<div class="count-line">${plural(rows.length, 'client')} past their usual cut, with nothing booked</div>
+    ${topbar(extra ? 'Booking reminder' : 'Overdue', '#home')}
+    ${rows.length ? `<div class="count-line">${extra ? (rows.length > 1 ? `${esc(extra.name.split(' ')[0])}, plus ${plural(rows.length - 1, 'client')} past their usual cut` : `Send ${esc(extra.name.split(' ')[0])} your openings`) : `${plural(rows.length, 'client')} past their usual cut, with nothing booked`}</div>
     <div class="group overdue">${rows.map(({ cl, s, late }) => {
       const ok = canEmail(cl);
       const on = ok && nudge.picked.has(cl.id);
@@ -1354,10 +1366,10 @@ function renderOverdue() {
         ${avatar(cl, photoBy[cl.id])}
         <div class="main">
           <div class="name">${esc(cl.name)}</div>
-          <div class="meta">Last cut ${fmtShort(s.last.date)} · every ${everyText(s.every)}</div>
+          <div class="meta">${s.last ? `Last cut ${fmtShort(s.last.date)}${s.every ? ` · every ${everyText(s.every)}` : ''}` : 'No cuts yet'}</div>
           ${why ? `<div class="meta ${cl.email && cl.reminders ? 'sent' : ''}">${why}</div>` : ''}
         </div>
-        <div class="right"><div class="num late">${late}</div><div class="meta">days late</div></div>
+        <div class="right">${late ? `<div class="num late">${late}</div><div class="meta">days late</div>` : `<div class="meta">not due</div>`}</div>
       </button>`;
     }).join('')}</div>` : `<div class="placeholder">${icon('check')}<h2>Nobody’s overdue</h2><p>Clients show up here once it’s been noticeably longer than their usual gap between cuts.</p></div>`}
 
@@ -1380,7 +1392,7 @@ function renderOverdue() {
     ${sample ? `<section class="card preview">
       <div class="eyebrow">Email preview</div>
       <div class="subj">Booking reminder</div>
-      <p>Hi ${esc(sample.cl.name.split(' ')[0])}, your last cut was on ${new Date(sample.s.last.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}, so you’re probably about due. Here’s when I have openings:</p>
+      <p>Hi ${esc(sample.cl.name.split(' ')[0])}, ${sample.s.last ? `your last cut was on ${new Date(sample.s.last.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}, so you’re probably about due` : 'it’s been a while, so you’re probably about due'}. Here’s when I have openings:</p>
       ${nudge.openings.length ? `<ul>${nudge.openings.map(o => `<li>${esc(slotLabel(o))}</li>`).join('')}</ul>` : `<p class="muted">Tap a day above to add your openings.</p>`}
       ${nudge.note.trim() ? `<p>${esc(nudge.note.trim())}</p>` : ''}
       <p>Feel free to message me on Instagram with the time that works and I’ll book you in.</p>
@@ -1390,7 +1402,11 @@ function renderOverdue() {
     ` : ''}
   `;
   wireBack();
-  $app.querySelector('[data-back]').onclick = () => { nudge.picked = null; go('#home'); };
+  $app.querySelector('[data-back]').onclick = () => {
+    const back = nudge.extra ? '#client-' + nudge.extra : '#home';
+    nudge.picked = null; nudge.extra = null;
+    go(back);
+  };
   $app.querySelectorAll('.overdue [data-id]').forEach(b => b.onclick = () => {
     const cl = data.clients.find(c => c.id === b.dataset.id);
     if (!canEmail(cl)) return go('#client-' + cl.id);
