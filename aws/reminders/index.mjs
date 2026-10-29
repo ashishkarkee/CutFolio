@@ -19,7 +19,7 @@ import nodemailer from 'nodemailer';
 
 const env = process.env;
 const SUPABASE_URL = (env.SUPABASE_URL || '').replace(/\/$/, '');
-const SUPABASE_KEY = env.SUPABASE_SECRET_KEY || '';
+const SUPABASE_KEY = (env.SUPABASE_SECRET_KEY || '').trim();
 const FROM = env.FROM_EMAIL;
 const REPLY_TO = env.REPLY_TO_EMAIL || '';
 const BARBER = env.BARBER_NAME || 'Lucas';
