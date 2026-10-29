@@ -138,7 +138,7 @@ async function nudge(owner, { clientIds, openings, note }, context) {
     const last = lastCut[c.id] ? dateLabel(lastCut[c.id]) : '';
     const email = {
       owner, clientId: c.id, kind: 'nudge', to: c.email,
-      subject: 'Haircut reminder',
+      subject: 'Booking reminder',
       lines: [
         `Hi ${firstName(c.name)},`,
         last ? `Your last cut was on ${last}, so you’re probably about due.` : `It’s been a while, so you’re probably about due.`,

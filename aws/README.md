@@ -4,7 +4,7 @@ Clients who have an email on their profile get:
 
 - **A booking confirmation** ("Haircut confirmed") as soon as they're booked (or moved).
 - **A 24-hour reminder** ("Haircut reminder"): "You're confirmed for a haircut tomorrow at 2 PM!"
-- **An overdue reminder** ("Haircut reminder") when the barber picks them on the Overdue screen: "Your last cut was on September 28… Here's when I have openings: Saturday 12–4 PM, Sunday 4–8 PM."
+- **An overdue reminder** ("Booking reminder") when the barber picks them on the Overdue screen: "Your last cut was on September 28… Here's when I have openings: Saturday 12–4 PM, Sunday 4–8 PM."
 
 Emails come from Lucas, are signed "Lucas", and point clients to Instagram for changes.
 
