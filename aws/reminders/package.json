@@ -1,0 +1,10 @@
+{
+  "name": "cutfolio-reminders",
+  "private": true,
+  "description": "CutFolio email reminders Lambda",
+  "type": "module",
+  "main": "index.mjs",
+  "dependencies": {
+    "nodemailer": "10.1.7"
+  }
+}

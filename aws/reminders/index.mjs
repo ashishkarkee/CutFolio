@@ -8,12 +8,14 @@
 //    before anything is read or sent.
 // 3. Clients open /unsubscribe from the link at the bottom of every email.
 //
+// Emails go out through Gmail (free) or Amazon SES (needs a domain).
 // Every email sent is logged in the Supabase "emails" table, which is how the
 // app shows what was sent on each profile.
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { LambdaClient, GetFunctionUrlConfigCommand } from '@aws-sdk/client-lambda';
+import nodemailer from 'nodemailer';
 
 const env = process.env;
 const SUPABASE_URL = (env.SUPABASE_URL || '').replace(/\/$/, '');
@@ -26,6 +28,13 @@ const DM = `Feel free to message me on Instagram${INSTAGRAM ? ` (@${INSTAGRAM})`
 const ADDRESS = env.SHOP_ADDRESS || '';
 const ZONE = env.SHOP_TIME_ZONE || 'America/New_York';
 
+// With a Gmail app password, emails go out through that Gmail account (free,
+// and they pass Gmail's sender checks). Without one, they go through SES,
+// which needs a domain of your own to stay out of spam.
+const GMAIL_PASSWORD = (env.GMAIL_APP_PASSWORD || '').replace(/\s+/g, '');
+const gmail = GMAIL_PASSWORD
+  ? nodemailer.createTransport({ service: 'gmail', auth: { user: FROM, pass: GMAIL_PASSWORD } })
+  : null;
 const ses = new SESv2Client({});
 const lambda = new LambdaClient({});
 
@@ -197,6 +206,14 @@ async function send(to, subject, lines, unsub) {
       : `<p style="margin:0 0 14px">${esc(p)}</p>`).join('') +
     `<p style="margin:22px 0 0">${esc(sign)}</p>` +
     `<p style="margin:28px 0 0;font-size:12px;color:#888">Don’t want these emails? <a href="${esc(unsub)}" style="color:#888">Unsubscribe</a></p></div>`;
+  const unsubHeaders = { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' };
+  if (gmail) {
+    const info = await gmail.sendMail({
+      from: { name: BARBER.replace(/[<>",]/g, ''), address: FROM },
+      to, replyTo: REPLY_TO || undefined, subject, text, html, headers: unsubHeaders,
+    });
+    return { MessageId: info.messageId };
+  }
   const cmd = () => ses.send(new SendEmailCommand({
     FromEmailAddress: `${BARBER.replace(/[<>",]/g, '')} <${FROM}>`,
     Destination: { ToAddresses: [to] },
@@ -205,10 +222,7 @@ async function send(to, subject, lines, unsub) {
       Simple: {
         Subject: { Data: subject, Charset: 'UTF-8' },
         Body: { Text: { Data: text, Charset: 'UTF-8' }, Html: { Data: html, Charset: 'UTF-8' } },
-        Headers: [
-          { Name: 'List-Unsubscribe', Value: `<${unsub}>` },
-          { Name: 'List-Unsubscribe-Post', Value: 'List-Unsubscribe=One-Click' },
-        ],
+        Headers: Object.entries(unsubHeaders).map(([Name, Value]) => ({ Name, Value })),
       },
     },
   }));

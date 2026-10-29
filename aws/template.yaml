@@ -3,7 +3,7 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   CutFolio email reminders. One Lambda that sends booking confirmations,
   24-hour reminders (run every 15 minutes by EventBridge Scheduler), and
-  come-back emails to overdue clients, all through Amazon SES.
+  come-back emails to overdue clients, through Gmail or Amazon SES.
 
 Parameters:
   SupabaseUrl:
@@ -15,7 +15,12 @@ Parameters:
     Description: Supabase secret key (sb_secret_...) from Project Settings > API Keys. Stays in Lambda, never in the app.
   FromEmail:
     Type: String
-    Description: The SES-verified address emails are sent from
+    Description: The Gmail address emails are sent from (or an SES-verified address if you use SES)
+  GmailAppPassword:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: 16-character Google app password for FromEmail. Leave blank to send through SES instead.
   ReplyToEmail:
     Type: String
     Default: ''
@@ -57,6 +62,7 @@ Resources:
           SUPABASE_URL: !Ref SupabaseUrl
           SUPABASE_SECRET_KEY: !Ref SupabaseSecretKey
           FROM_EMAIL: !Ref FromEmail
+          GMAIL_APP_PASSWORD: !Ref GmailAppPassword
           REPLY_TO_EMAIL: !Ref ReplyToEmail
           BARBER_NAME: !Ref BarberName
           INSTAGRAM_HANDLE: !Ref InstagramHandle
